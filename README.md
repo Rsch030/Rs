@@ -2,6 +2,12 @@
 
 Paper-trading/research build with six independent strategy accounts.
 
+New paper trades settle without fee or slippage deductions: `net_R = raw_R`
+and the account receives the gross P/L. Configured cost estimates still guide
+signal sizing and management. Historical trades and balances are preserved;
+past deductions are not refunded. The dashboard and `/api/status` identify
+this policy (`paper_costs_charged: false`).
+
 ## Included
 - `bot.py` — BTC V1.7.6 research bot
 - `storage.py` — recoverable state snapshots and CSV export journal
