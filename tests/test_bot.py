@@ -146,15 +146,40 @@ class BotTests(unittest.TestCase):
         self.assertEqual(result[0]['regime'], 'TEST')
         self.assertEqual(result[0]['trades'], 1)
 
-    def test_zero_gross_return_still_displays_costs(self):
+    def test_zero_gross_return_has_no_cost_deductions(self):
         self.enter()
         with self.bot.store.transaction(self.state):
             self.bot.close_position('EMA_SCALP', self.state,
                                     self.state['strategies']['EMA_SCALP'],
                                     10000., self.time+pd.Timedelta(minutes=5), 'TEST')
         trade = self.bot.recent()[0]
-        self.assertGreater(trade['costs_R'], 0)
-        self.assertAlmostEqual(trade['costs_R'], -trade['net_R'])
+        self.assertEqual(trade['costs_R'], 0)
+        self.assertEqual(trade['costs_eur'], 0)
+        self.assertEqual(trade['net_R'], 0)
+        self.assertEqual(trade['balance'], 500)
+
+    def test_paper_settlement_uses_gross_profit_for_both_sides(self):
+        # Nonzero configured estimates must not reduce the account settlement.
+        self.bot.TAKER_FEE = .00035
+        self.bot.SLIPPAGE_BPS = 1.0
+        for side, exit_price in [('LONG', 10035.), ('SHORT', 9965.),
+                                 ('LONG', 9900.), ('SHORT', 10100.)]:
+            with self.subTest(side=side, exit_price=exit_price):
+                account = self.enter(side)
+                balance = account['balance']
+                risk = account['position']['risk_eur']
+                expected_r = .35 if exit_price in (10035., 9965.) else -1.
+                with self.bot.store.transaction(self.state):
+                    self.bot.close_position('EMA_SCALP', self.state, account,
+                                            exit_price, self.time, 'TEST')
+                trade = pd.read_csv(self.bot.TRADES_FILE).iloc[-1]
+                self.assertEqual(trade.fees_eur, 0)
+                self.assertEqual(trade.slippage_eur, 0)
+                self.assertAlmostEqual(trade.net_R, expected_r)
+                self.assertAlmostEqual(trade.pnl_eur, risk * expected_r)
+                self.assertAlmostEqual(account['balance'], balance + risk * expected_r)
+                if expected_r > 0:
+                    self.assertEqual(account['loss_streak'], 0)
 
     def test_legacy_open_entry_times_migrate_only_once(self):
         account = self.enter()
