@@ -455,7 +455,7 @@ def signal_for(key,c,snap):
     feat['quality_pass']=bool(detector_quality>=LIVE_MIN_QUALITY)
     feat['soft_context_mismatch']=bool(soft_mismatch)
     if RESEARCH_MODE:
-        # V1.7.6: estimated costs are logged and charged to net_R, but do not censor a
+        # V1.7.6: estimated costs are logged for signal analysis, but do not censor a
         # technically valid paper-research signal. This lets us measure whether the cost
         # hypothesis truly separates good/bad trades instead of throwing the sample away.
         allowed=(not hard_context) and detector_quality>=LIVE_MIN_QUALITY and (not soft_mismatch or detector_quality>=SOFT_CONTEXT_MIN_QUALITY)
@@ -572,7 +572,9 @@ def open_position(key,state,s,sig):
 
 def close_position(key,state,s,exit_price,exit_time,reason):
     p=s['position'];raw_r=(exit_price-p['entry_price'])/p['stop_distance'] if p['side']=='LONG' else (p['entry_price']-exit_price)/p['stop_distance']
-    gross=p['risk_eur']*raw_r;fee=(p['notional']+p['qty']*exit_price)*TAKER_FEE;slip=(p['notional']+p['qty']*exit_price)*(SLIPPAGE_BPS/10000.0)
+    # Paper accounts settle gross returns without simulated fee/slippage deductions.
+    # Keep the cost estimates used by signal sizing and management unchanged.
+    gross=p['risk_eur']*raw_r;fee=0.0;slip=0.0
     pnl=gross-fee-slip;net_r=pnl/p['risk_eur'] if p['risk_eur'] else 0
     s['balance']+=pnl;s['peak_balance']=max(s['peak_balance'],s['balance']);s['max_drawdown']=min(s['max_drawdown'],s['balance']/s['peak_balance']-1);state['total_trades']+=1
     if pnl>0:
@@ -743,7 +745,7 @@ def regime_performance():
 DASH='''<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="20"><title>BTC V1.7.6 Quant Research</title><style>
 :root{--bg:#0b0e13;--card:#151922;--card2:#10141c;--line:#2a3140;--text:#f5f7fb;--muted:#8e98aa;--green:#55d68b;--red:#ff6b72;--amber:#f3c969}*{box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);margin:0;padding:14px}.w{max-width:1250px;margin:auto}.top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:8px 2px 16px}.title{font-size:34px;font-weight:900}.sub,.muted{color:var(--muted)}.running{font-size:12px;padding:6px 9px;border-radius:999px;background:#153222;color:var(--green);font-weight:800}.grid{display:grid;grid-template-columns:repeat(6,1fr);gap:9px}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:13px}.label{font-size:11px;color:var(--muted);text-transform:uppercase}.value{font-size:24px;font-weight:850;margin-top:4px}.mini{font-size:12px;margin-top:3px}.pos{color:var(--green)!important}.neg{color:var(--red)!important}.amber{color:var(--amber)!important}.section{margin-top:10px}.section h2{font-size:16px;margin:0 0 10px}.market{display:grid;grid-template-columns:1.4fr repeat(4,1fr);gap:9px}.tag{display:inline-block;padding:4px 7px;border-radius:999px;font-size:10px}.live{background:#153222;color:var(--green)}.shadow{background:#332d18;color:var(--amber)}.tablewrap{overflow-x:auto;-webkit-overflow-scrolling:touch}table{width:100%;border-collapse:collapse;font-size:12px;white-space:nowrap}td,th{padding:9px 8px;border-bottom:1px solid var(--line);text-align:left}th{color:var(--muted);font-size:10px;text-transform:uppercase}.strategy{font-weight:750}.pill{padding:3px 6px;border-radius:6px;background:#242b39;font-size:10px}.two{display:grid;grid-template-columns:1.35fr 1fr;gap:10px}.empty{padding:18px;text-align:center;color:var(--muted);background:var(--card2);border-radius:10px}.downloads{display:flex;gap:8px;flex-wrap:wrap}.btn{color:var(--text);text-decoration:none;background:#242b39;border:1px solid #343d4f;border-radius:9px;padding:8px 10px;font-size:12px}.small{font-size:10px}
 @media(max-width:900px){.grid{grid-template-columns:repeat(3,1fr)}.market{grid-template-columns:repeat(3,1fr)}.two{grid-template-columns:1fr}}@media(max-width:520px){body{padding:10px}.grid{grid-template-columns:repeat(2,1fr)}.market{grid-template-columns:repeat(2,1fr)}.market>div:first-child{grid-column:span 2}.card{padding:11px}.value{font-size:21px}}
-</style></head><body><div class="w"><div class="top"><div><div class="title">BTC V1</div><div class="sub">Control Center · independent strategy accounts · paper trading · refresh 20s</div></div><div class="running">● {{engine.status|upper}}</div></div>
+</style></head><body><div class="w"><div class="top"><div><div class="title">BTC V1</div><div class="sub">Control Center · independent strategy accounts · paper trading · costs uit voor nieuwe trades · refresh 20s</div></div><div class="running">● {{engine.status|upper}}</div></div>
 <div class="grid">
 <div class="card"><div class="label">Combined realized balances</div><div class="value {{'pos' if s.return_pct>=0 else 'neg'}}">€{{'%.2f'|format(s.balance)}}</div><div class="mini">{{'%+.2f'|format(s.return_pct)}}%</div></div>
 <div class="card"><div class="label">Net P/L</div><div class="value {{'pos' if s.net_pnl>=0 else 'neg'}}">€{{'%+.2f'|format(s.net_pnl)}}</div><div class="mini">{{'%+.2f'|format(s.net_r)}}R totaal</div></div>
@@ -791,7 +793,7 @@ def dashboard():
     return render_template_string(DASH,s=stats(st),r=r,engine=engine_status(),strat=strategy_dashboard(st),openpos=open_positions_dashboard(st,price),decisions=_read_csv_records(DECISIONS_FILE,36),regimes=regime_performance(),recent=recent())
 @app.get('/api/status')
 def status():
-    st=load_state(); c=load_candles(); return jsonify({'version':'BTC-V1.7.6-RESEARCH','run_mode':RUN_MODE,'engine':engine_status(),'decision_funnel':decision_funnel(),'stats':stats(st),'regime':regime_snapshot(c),'strategies':STRATEGIES})
+    st=load_state(); c=load_candles(); return jsonify({'version':'BTC-V1.7.6-RESEARCH','run_mode':RUN_MODE,'paper_costs_charged':False,'engine':engine_status(),'decision_funnel':decision_funnel(),'stats':stats(st),'regime':regime_snapshot(c),'strategies':STRATEGIES})
 def dl(path,name):
     if not os.path.exists(path):return {'error':'Nog geen bestand.'},404
     return send_file(path,mimetype='text/csv',as_attachment=True,download_name=name)
@@ -821,7 +823,7 @@ def run_dashboard():app.run(host='0.0.0.0',port=int(os.getenv('PORT','8080')),th
 
 def main():
     state=load_state()
-    threading.Thread(target=run_dashboard,daemon=True).start();print(f'BTC V1.7.6 RESEARCH — PAPER ONLY — mode={RUN_MODE} — auditable research accounts — costs measured/not censored — risk/trade={RISK_PER_TRADE:.2%}',flush=True)
+    threading.Thread(target=run_dashboard,daemon=True).start();print(f'BTC V1.7.6 RESEARCH — PAPER ONLY — mode={RUN_MODE} — auditable research accounts — cost estimates measured / paper deductions disabled — risk/trade={RISK_PER_TRADE:.2%}',flush=True)
     candles=update_candles(load_candles())
     while True:
         try:
@@ -879,4 +881,3 @@ def main():
             engine.update(status='error',error=str(e))
             print('[ERROR]',repr(e),flush=True);time.sleep(60)
 if __name__=='__main__':main()
-
