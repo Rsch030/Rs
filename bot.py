@@ -6,10 +6,10 @@ import requests
 import pandas as pd
 import numpy as np
 
-# BTC V1.7.6 RESEARCH — independent paper account per strategy
+# BTC V1.7.7 RESEARCH — independent paper account per strategy
 INST_ID = os.getenv('INST_ID', 'BTC-USDT')
 START_BALANCE = float(os.getenv('START_BALANCE', '500'))
-RISK_PER_TRADE = float(os.getenv('RISK_PER_TRADE', '0.01'))
+RISK_PER_TRADE = float(os.getenv('RISK_PER_TRADE', '0.005'))
 TAKER_FEE = float(os.getenv('TAKER_FEE', '0.00035'))
 SLIPPAGE_BPS = float(os.getenv('SLIPPAGE_BPS', '1.0'))
 POLL_SECONDS = int(os.getenv('POLL_SECONDS', '20'))
@@ -20,6 +20,7 @@ RESEARCH_EMERGENCY_DD = float(os.getenv('RESEARCH_EMERGENCY_DD','0.25'))
 # V1.7: no shared portfolio cap. Each strategy owns an independent paper account.
 COOLDOWN_AFTER_LOSSES = 3
 COOLDOWN_HOURS = 8
+REENTRY_PAUSE_MINUTES = max(5, int(os.getenv('REENTRY_PAUSE_MINUTES', '15')))
 MIN_SCORE = float(os.getenv('MIN_SCORE','65'))
 MAX_COST_R = float(os.getenv('MAX_COST_R','0.35'))
 DAILY_LOSS_LIMIT = float(os.getenv('DAILY_LOSS_LIMIT','0.03'))
@@ -63,7 +64,7 @@ STRATEGIES = {
 }
 
 
-session=requests.Session(); session.headers.update({'User-Agent':'BTC-V1/1.7.6-RESEARCH'})
+session=requests.Session(); session.headers.update({'User-Agent':'BTC-V1/1.7.7-RESEARCH'})
 state_lock=threading.RLock()
 store=SnapshotStore(STATE_FILE,state_lock)
 engine={'status':'starting','last_success':None,'last_candle_close':None,'error':None}
@@ -75,7 +76,7 @@ def finite(x):
 def strategy_default():
     return {'position':None,'balance':START_BALANCE,'peak_balance':START_BALANCE,'max_drawdown':0.0,'risk_day':None,'day_start_balance':START_BALANCE,'loss_streak':0,'cooldown_until':None,'scans':0,'signals':0,'blocked':0,'last_signal':'—','last_signal_time':None}
 def default_state():
-    return {'version':'BTC-V1.7.6-RESEARCH','created':utc_now().isoformat(),'last_processed_5m':None,'balance':START_BALANCE,'peak_balance':START_BALANCE,'max_drawdown':0.0,'total_trades':0,'winning_trades':0,'losing_trades':0,'gross_profit':0.0,'gross_loss':0.0,'global_loss_streak':0,'risk_day':None,'day_start_balance':START_BALANCE,'shadow_candidates':{},'strategies':{k:strategy_default() for k in STRATEGIES}}
+    return {'version':'BTC-V1.7.7-RESEARCH','created':utc_now().isoformat(),'last_processed_5m':None,'balance':START_BALANCE,'peak_balance':START_BALANCE,'max_drawdown':0.0,'total_trades':0,'winning_trades':0,'losing_trades':0,'gross_profit':0.0,'gross_loss':0.0,'global_loss_streak':0,'risk_day':None,'day_start_balance':START_BALANCE,'shadow_candidates':{},'strategies':{k:strategy_default() for k in STRATEGIES}}
 def normalize_state(s):
     base=default_state()
     legacy=s.get('version')=='BTC-V1.7.5-RESEARCH'
@@ -455,7 +456,7 @@ def signal_for(key,c,snap):
     feat['quality_pass']=bool(detector_quality>=LIVE_MIN_QUALITY)
     feat['soft_context_mismatch']=bool(soft_mismatch)
     if RESEARCH_MODE:
-        # V1.7.6: estimated costs are logged for signal analysis, but do not censor a
+        # V1.7.7: estimated costs are logged for signal analysis, but do not censor a
         # technically valid paper-research signal. This lets us measure whether the cost
         # hypothesis truly separates good/bad trades instead of throwing the sample away.
         allowed=(not hard_context) and detector_quality>=LIVE_MIN_QUALITY and (not soft_mismatch or detector_quality>=SOFT_CONTEXT_MIN_QUALITY)
@@ -521,22 +522,30 @@ def refresh_risk_day(account,now=None):
         account['risk_day']=day
         account['day_start_balance']=account['balance']
 
-def risk_permission(account):
-    refresh_risk_day(account)
+def risk_permission(account,now=None):
+    now=now or utc_now()
+    refresh_risk_day(account,now)
+    if not finite(RISK_PER_TRADE) or RISK_PER_TRADE<=0:return False,'INVALID_RISK_PER_TRADE'
     if RISK_PER_TRADE>0.0100001:return False,'RISK_PER_TRADE_GT_1PCT'
+    if not finite(account['balance']) or account['balance']<=0:return False,'INVALID_ACCOUNT_BALANCE'
+    # Risk controls apply to paper research too. A legacy losing streak gets one
+    # pause on upgrade, rather than repeatedly re-arming after its pause expires.
+    streak=account.get('loss_streak',0)
+    if streak>=COOLDOWN_AFTER_LOSSES and account.get('cooldown_loss_streak')!=streak:
+        account['cooldown_until']=(now+timedelta(hours=COOLDOWN_HOURS)).isoformat()
+        account['cooldown_loss_streak']=streak
+    if is_cooldown(account,now):return False,'STRATEGY_COOLDOWN'
+    if account.get('reentry_after') and pd.Timestamp(now)<pd.Timestamp(account['reentry_after']):
+        return False,'REENTRY_PAUSE'
     dd=account['balance']/max(account.get('peak_balance',account['balance']),1e-9)-1
-    if RESEARCH_MODE:
-        if dd<=-RESEARCH_EMERGENCY_DD:return False,'RESEARCH_EMERGENCY_DD'
-        return True,'RESEARCH_RISK_OK'
     day_start=max(float(account.get('day_start_balance') or account['balance']),1e-9)
     if account['balance']/day_start-1<=-DAILY_LOSS_LIMIT:return False,'STRATEGY_DAILY_LOSS_LIMIT'
     if dd<=-DRAWDOWN_HARD:return False,'STRATEGY_HARD_DRAWDOWN_MODE'
     return True,'RISK_OK'
 
 def effective_risk_pct(account):
-    if RESEARCH_MODE:return min(RISK_PER_TRADE,0.01)
     dd=account['balance']/max(account.get('peak_balance',account['balance']),1e-9)-1
-    return min(RISK_PER_TRADE,0.005 if dd<=-DRAWDOWN_SOFT else RISK_PER_TRADE)
+    return min(RISK_PER_TRADE,min(RISK_PER_TRADE,0.0025) if dd<=-DRAWDOWN_SOFT else RISK_PER_TRADE)
 
 def validate_order_candidate(key,sig):
     """Fail closed on malformed sizing/geometry instead of silently opening a corrupt paper trade."""
@@ -554,6 +563,13 @@ def validate_order_candidate(key,sig):
         return True,'ORDER_SANITY_OK'
     except Exception:
         return False,'ORDER_SANITY_EXCEPTION'
+
+def entry_data_permission(signal_time,now=None):
+    now=pd.Timestamp(now or utc_now())
+    age=(now-pd.Timestamp(signal_time)).total_seconds()
+    if age<0:return False,'FUTURE_SIGNAL'
+    if age>max(120,3*POLL_SECONDS):return False,'STALE_SIGNAL'
+    return True,'FRESH_SIGNAL'
 
 def open_position(key,state,s,sig):
     entry,dist,side=sig['entry'],sig['stop_distance'],sig['signal'];cfg=STRATEGIES[key]
@@ -578,10 +594,13 @@ def close_position(key,state,s,exit_price,exit_time,reason):
     pnl=gross-fee-slip;net_r=pnl/p['risk_eur'] if p['risk_eur'] else 0
     s['balance']+=pnl;s['peak_balance']=max(s['peak_balance'],s['balance']);s['max_drawdown']=min(s['max_drawdown'],s['balance']/s['peak_balance']-1);state['total_trades']+=1
     if pnl>0:
-        state['winning_trades']+=1;state['gross_profit']+=pnl;s['loss_streak']=0
+        state['winning_trades']+=1;state['gross_profit']+=pnl;s['loss_streak']=0;s['cooldown_loss_streak']=0
     else:
         state['losing_trades']+=1;state['gross_loss']+=abs(pnl);s['loss_streak']+=1
-        if (not RESEARCH_MODE) and s['loss_streak']>=COOLDOWN_AFTER_LOSSES:s['cooldown_until']=(exit_time+timedelta(hours=COOLDOWN_HOURS)).isoformat()
+        if s['loss_streak']>=COOLDOWN_AFTER_LOSSES:
+            s['cooldown_until']=(exit_time+timedelta(hours=COOLDOWN_HOURS)).isoformat()
+            s['cooldown_loss_streak']=s['loss_streak']
+    s['reentry_after']=(exit_time+timedelta(minutes=REENTRY_PAUSE_MINUTES)).isoformat()
     giveback=max(0,float(p.get('mfe_r',0))-raw_r)
     append_fixed(TRADES_FILE,{'schema_version':'6.1','candidate_id':p['candidate_id'],'strategy':key,'entry_time':p['entry_time'],
       'exit_time':exit_time.isoformat(),'side':p['side'],'setup':p['setup'],'regime':p.get('regime'),'score_total':p.get('score_total'),
@@ -742,7 +761,7 @@ def regime_performance():
         print('[WARN] regime performance',repr(exc),flush=True)
         return []
 
-DASH='''<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="20"><title>BTC V1.7.6 Quant Research</title><style>
+DASH='''<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="20"><title>BTC V1.7.7 Quant Research</title><style>
 :root{--bg:#0b0e13;--card:#151922;--card2:#10141c;--line:#2a3140;--text:#f5f7fb;--muted:#8e98aa;--green:#55d68b;--red:#ff6b72;--amber:#f3c969}*{box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);margin:0;padding:14px}.w{max-width:1250px;margin:auto}.top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:8px 2px 16px}.title{font-size:34px;font-weight:900}.sub,.muted{color:var(--muted)}.running{font-size:12px;padding:6px 9px;border-radius:999px;background:#153222;color:var(--green);font-weight:800}.grid{display:grid;grid-template-columns:repeat(6,1fr);gap:9px}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:13px}.label{font-size:11px;color:var(--muted);text-transform:uppercase}.value{font-size:24px;font-weight:850;margin-top:4px}.mini{font-size:12px;margin-top:3px}.pos{color:var(--green)!important}.neg{color:var(--red)!important}.amber{color:var(--amber)!important}.section{margin-top:10px}.section h2{font-size:16px;margin:0 0 10px}.market{display:grid;grid-template-columns:1.4fr repeat(4,1fr);gap:9px}.tag{display:inline-block;padding:4px 7px;border-radius:999px;font-size:10px}.live{background:#153222;color:var(--green)}.shadow{background:#332d18;color:var(--amber)}.tablewrap{overflow-x:auto;-webkit-overflow-scrolling:touch}table{width:100%;border-collapse:collapse;font-size:12px;white-space:nowrap}td,th{padding:9px 8px;border-bottom:1px solid var(--line);text-align:left}th{color:var(--muted);font-size:10px;text-transform:uppercase}.strategy{font-weight:750}.pill{padding:3px 6px;border-radius:6px;background:#242b39;font-size:10px}.two{display:grid;grid-template-columns:1.35fr 1fr;gap:10px}.empty{padding:18px;text-align:center;color:var(--muted);background:var(--card2);border-radius:10px}.downloads{display:flex;gap:8px;flex-wrap:wrap}.btn{color:var(--text);text-decoration:none;background:#242b39;border:1px solid #343d4f;border-radius:9px;padding:8px 10px;font-size:12px}.small{font-size:10px}
 @media(max-width:900px){.grid{grid-template-columns:repeat(3,1fr)}.market{grid-template-columns:repeat(3,1fr)}.two{grid-template-columns:1fr}}@media(max-width:520px){body{padding:10px}.grid{grid-template-columns:repeat(2,1fr)}.market{grid-template-columns:repeat(2,1fr)}.market>div:first-child{grid-column:span 2}.card{padding:11px}.value{font-size:21px}}
 </style></head><body><div class="w"><div class="top"><div><div class="title">BTC V1</div><div class="sub">Control Center · independent strategy accounts · paper trading · costs uit voor nieuwe trades · refresh 20s</div></div><div class="running">● {{engine.status|upper}}</div></div>
@@ -752,7 +771,7 @@ DASH='''<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="v
 <div class="card"><div class="label">Trades</div><div class="value">{{s.trades}}</div><div class="mini">{{s.wins}}W · {{s.losses}}L</div></div>
 <div class="card"><div class="label">Winrate</div><div class="value">{{'%.1f'|format(s.winrate)}}%</div><div class="mini">PF {{'%.2f'|format(s.pf) if s.pf<900 else '∞'}}</div></div>
 <div class="card"><div class="label">Max DD</div><div class="value {{'neg' if s.max_dd<0 else ''}}">{{'%.2f'|format(s.max_dd)}}%</div><div class="mini">Worst strategy DD</div></div>
-<div class="card"><div class="label">Open risk</div><div class="value">{{'%.2f'|format(s.open_risk_pct)}}%</div><div class="mini">1.00% max per strategy account</div></div></div>
+<div class="card"><div class="label">Open risk</div><div class="value">{{'%.2f'|format(s.open_risk_pct)}}%</div><div class="mini">{{'%.2f'|format(risk_per_trade*100)}}% basis per strategy account · verlieslimieten actief</div></div></div>
 <div class="section market"><div class="card"><div class="label">Market regime</div><div class="value">{{r.regime}}</div><div class="mini">{{r.direction}} · BTC ${{'{:,.0f}'.format(r.price) if r.price else '—'}}</div></div><div class="card"><div class="label">ADX 1H</div><div class="value">{{'%.1f'|format(r.adx) if r.adx is not none else '—'}}</div></div><div class="card"><div class="label">ER24 1H</div><div class="value">{{'%.3f'|format(r.er24) if r.er24 is not none else '—'}}</div></div><div class="card"><div class="label">Vol ratio</div><div class="value">{{'%.2f'|format(r.vol_ratio) if r.vol_ratio is not none else '—'}}</div></div><div class="card"><div class="label">Open positions</div><div class="value">{{openpos|length}}</div></div></div>
 <div class="card section"><h2>Engine monitor</h2><div class="tablewrap"><table><tr><th>Engine</th><th>Mode</th><th>Account</th><th>Return</th><th>Trades</th><th>WR</th><th>Net R</th><th>P/L</th><th>PF</th><th>Signals</th><th>Blocked</th><th>Loss streak</th><th>Laatste signal</th></tr>{% for x in strat %}<tr><td><div class="strategy">{{x.label}}</div><div class="muted small">{{x.key}}</div></td><td><span class="tag {{'live' if x.mode=='PAPER' else 'shadow'}}">{{x.mode}}</span></td><td>€{{'%.2f'|format(x.account_balance)}}</td><td class="{{'pos' if x.account_return>=0 else 'neg'}}">{{'%+.2f'|format(x.account_return)}}%</td><td>{{x.trades}}</td><td>{{'%.1f'|format(x.winrate)}}%</td><td class="{{'pos' if x.net_r>0 else 'neg' if x.net_r<0 else ''}}">{{'%+.2f'|format(x.net_r)}}</td><td class="{{'pos' if x.pnl>0 else 'neg' if x.pnl<0 else ''}}">€{{'%+.2f'|format(x.pnl)}}</td><td>{{'%.2f'|format(x.pf) if x.pf<900 else '∞'}}</td><td>{{x.signals}}</td><td>{{x.blocked}}</td><td>{{x.loss_streak}}</td><td>{{x.last_signal}}{% if x.cooldown_until %}<div class="amber small">Cooldown → {{x.cooldown_until[11:16]}}</div>{% endif %}</td></tr>{% endfor %}</table></div></div>
 <div class="card section"><h2>Open trades</h2>{% if openpos %}<div class="tablewrap"><table><tr><th>Strategy</th><th>Side</th><th>Entry</th><th>Current</th><th>SL</th><th>TP</th><th>Current R</th><th>MFE</th><th>MAE</th><th>Risk €</th></tr>{% for p in openpos %}<tr><td class="strategy">{{p.strategy}}</td><td>{{p.side}}</td><td>${{'{:,.0f}'.format(p.entry_price)}}</td><td>${{'{:,.0f}'.format(p.current_price)}}</td><td>${{'{:,.0f}'.format(p.stop)}}</td><td>${{'{:,.0f}'.format(p.target)}}</td><td class="{{'pos' if p.current_r>=0 else 'neg'}}">{{'%+.2f'|format(p.current_r)}}R</td><td class="pos">{{'%.2f'|format(p.mfe_r)}}R</td><td class="neg">{{'%.2f'|format(p.mae_r)}}R</td><td>€{{'%.2f'|format(p.risk_eur)}}</td></tr>{% endfor %}</table></div>{% else %}<div class="empty">Geen open trades — V1 wacht op een geldige setup.</div>{% endif %}</div>
@@ -790,10 +809,10 @@ def recent(n=30):
 @app.get('/')
 def dashboard():
     st=load_state(); c=load_candles(); r=regime_snapshot(c); price=float(c.close.iloc[-1]) if len(c) else 0
-    return render_template_string(DASH,s=stats(st),r=r,engine=engine_status(),strat=strategy_dashboard(st),openpos=open_positions_dashboard(st,price),decisions=_read_csv_records(DECISIONS_FILE,36),regimes=regime_performance(),recent=recent())
+    return render_template_string(DASH,s=stats(st),r=r,risk_per_trade=RISK_PER_TRADE,engine=engine_status(),strat=strategy_dashboard(st),openpos=open_positions_dashboard(st,price),decisions=_read_csv_records(DECISIONS_FILE,36),regimes=regime_performance(),recent=recent())
 @app.get('/api/status')
 def status():
-    st=load_state(); c=load_candles(); return jsonify({'version':'BTC-V1.7.6-RESEARCH','run_mode':RUN_MODE,'paper_costs_charged':False,'engine':engine_status(),'decision_funnel':decision_funnel(),'stats':stats(st),'regime':regime_snapshot(c),'strategies':STRATEGIES})
+    st=load_state(); c=load_candles(); return jsonify({'version':'BTC-V1.7.7-RESEARCH','run_mode':RUN_MODE,'paper_costs_charged':False,'loss_guards_active':True,'risk_per_trade':RISK_PER_TRADE,'reentry_pause_minutes':REENTRY_PAUSE_MINUTES,'engine':engine_status(),'decision_funnel':decision_funnel(),'stats':stats(st),'regime':regime_snapshot(c),'strategies':STRATEGIES})
 def dl(path,name):
     if not os.path.exists(path):return {'error':'Nog geen bestand.'},404
     return send_file(path,mimetype='text/csv',as_attachment=True,download_name=name)
@@ -817,13 +836,13 @@ def engine_status():
 @app.get('/health')
 def health():
     status=engine_status()
-    return {'status':status['status'],'version':'BTC-V1.7.6-RESEARCH','run_mode':RUN_MODE,'engine':status,'risk_per_trade':RISK_PER_TRADE},200 if status['status']=='running' else 503
+    return {'status':status['status'],'version':'BTC-V1.7.7-RESEARCH','run_mode':RUN_MODE,'engine':status,'risk_per_trade':RISK_PER_TRADE},200 if status['status']=='running' else 503
 
 def run_dashboard():app.run(host='0.0.0.0',port=int(os.getenv('PORT','8080')),threaded=True,use_reloader=False)
 
 def main():
     state=load_state()
-    threading.Thread(target=run_dashboard,daemon=True).start();print(f'BTC V1.7.6 RESEARCH — PAPER ONLY — mode={RUN_MODE} — auditable research accounts — cost estimates measured / paper deductions disabled — risk/trade={RISK_PER_TRADE:.2%}',flush=True)
+    threading.Thread(target=run_dashboard,daemon=True).start();print(f'BTC V1.7.7 RESEARCH — PAPER ONLY — mode={RUN_MODE} — auditable research accounts — cost estimates measured / paper deductions disabled — risk/trade={RISK_PER_TRADE:.2%}',flush=True)
     candles=update_candles(load_candles())
     while True:
         try:
@@ -851,15 +870,17 @@ def main():
                             decision='BLOCK_'+str(sig.get('router_reason'))
                         elif st.get('position') is not None:
                             decision='BLOCK_ALREADY_OPEN'
-                        elif (not RESEARCH_MODE) and is_cooldown(st):
+                        elif is_cooldown(st):
                             decision='BLOCK_STRATEGY_COOLDOWN'
+                        elif not entry_data_permission(sig['time'])[0]:
+                            decision='BLOCK_'+entry_data_permission(sig['time'])[1]
                         else:
                             order_ok,order_reason=validate_order_candidate(key,sig)
                             if not order_ok:
                                 decision='BLOCK_'+order_reason
                                 start_shadow(state,sig,decision)
                             else:
-                                risk_ok,risk_reason=risk_permission(st)
+                                risk_ok,risk_reason=risk_permission(st,sig['time'])
                                 if not risk_ok:
                                     decision='BLOCK_'+risk_reason
                                     start_shadow(state,sig,decision)

@@ -1,4 +1,4 @@
-# BTC V1.7.6 RESEARCH
+# BTC V1.7.7 RESEARCH
 
 Paper-trading/research build with six independent strategy accounts.
 
@@ -9,7 +9,7 @@ past deductions are not refunded. The dashboard and `/api/status` identify
 this policy (`paper_costs_charged: false`).
 
 ## Included
-- `bot.py` — BTC V1.7.6 research bot
+- `bot.py` — BTC V1.7.7 research bot
 - `storage.py` — recoverable state snapshots and CSV export journal
 - `requirements.txt` — Python dependencies
 - `railway.json` — Railway deployment configuration
@@ -21,7 +21,7 @@ this policy (`paper_costs_charged: false`).
 4. Deploy the service.
 5. Mount a persistent Railway volume at `/data` (or set `DATA_DIR` to its mount path).
 6. Run exactly one service replica/process per data directory.
-7. Confirm the startup logs identify **BTC V1.7.6 RESEARCH**.
+7. Confirm the startup logs identify **BTC V1.7.7 RESEARCH**.
 
 ## Correctness changes
 - OKX candle timestamps represent the open. Higher timeframes now use the correct
@@ -57,3 +57,22 @@ it excludes web/HTTP dependencies and skips Flask integration.
 - API keys, tokens, `.env` files and other secrets are intentionally not included.
 - Environment variables/secrets, if required for your own deployment, must be configured separately in Railway.
 - Keep research datasets from different bot versions separate.
+
+
+## V1.7.7 loss controls
+- Default risk is 0.5% per trade, reduced to at most 0.25% after 6% drawdown.
+- Both RESEARCH and production enforce the 3% daily realized loss limit and
+  9% hard realized drawdown limit. Limits can be exceeded by an already open trade
+  or a stop gap; they block new entries, not retroactively cap losses.
+- Three consecutive losses pause the strategy for eight hours. An existing legacy
+  losing streak receives one pause on its next entry evaluation.
+- Every exit blocks re-entry for 15 minutes (REENTRY_PAUSE_MINUTES, minimum five).
+- Signals older than max(120 seconds, three polling intervals) cannot open trades.
+- Historical losses remain visible; paper costs policy from main is preserved.
+
+## Current deployment status (2026-10-05)
+GitHub write access has been restored and these changes are proposed on a branch.
+Railway currently runs an older build and has no persistent volume on trade-bot.
+Before merging or deploying, preserve the actual running state and complete data
+directory and migrate them to a persistent volume. Public CSV exports are not a
+complete restorable snapshot. These changes are not yet active on the dashboard.

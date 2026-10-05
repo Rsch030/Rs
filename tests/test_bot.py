@@ -84,6 +84,51 @@ class BotTests(unittest.TestCase):
         self.assertLess(trade.net_R, 0)
         self.assertEqual(trade.reason, 'DETERIORATION_MARKET_EXIT')
 
+    def test_research_daily_loss_limit_is_enforced(self):
+        account=self.state['strategies']['EMA_SCALP']
+        account.update(balance=480.,risk_day=self.time.date().isoformat(),day_start_balance=500.)
+        self.assertEqual(self.bot.risk_permission(account,self.time),(False,'STRATEGY_DAILY_LOSS_LIMIT'))
+
+    def test_research_hard_drawdown_is_enforced(self):
+        account=self.state['strategies']['EMA_SCALP']
+        account.update(balance=450.,peak_balance=500.)
+        self.assertEqual(self.bot.risk_permission(account,self.time),(False,'STRATEGY_HARD_DRAWDOWN_MODE'))
+
+    def test_legacy_loss_streak_gets_one_pause(self):
+        account=self.state['strategies']['EMA_SCALP']
+        account['loss_streak']=4
+        self.assertEqual(self.bot.risk_permission(account,self.time),(False,'STRATEGY_COOLDOWN'))
+        self.assertTrue(self.bot.risk_permission(account,self.time+pd.Timedelta(hours=9))[0])
+        self.assertTrue(self.bot.risk_permission(account,self.time+pd.Timedelta(hours=10))[0])
+
+    def test_loss_pause_applies_in_research(self):
+        account=self.enter()
+        account['loss_streak']=2
+        self.manage(10000.,10010.,9880.,9900.)
+        self.assertEqual(account['loss_streak'],3)
+        self.assertEqual(self.bot.risk_permission(account,self.time+pd.Timedelta(minutes=10)),(False,'STRATEGY_COOLDOWN'))
+
+    def test_exit_prevents_immediate_reentry(self):
+        account=self.enter()
+        self.manage(10000.,10010.,9880.,9900.)
+        exit_time=self.time+pd.Timedelta(minutes=5)
+        self.assertEqual(self.bot.risk_permission(account,exit_time),(False,'REENTRY_PAUSE'))
+        self.assertTrue(self.bot.risk_permission(account,exit_time+pd.Timedelta(minutes=15))[0])
+
+    def test_invalid_risk_does_not_open_negative_size(self):
+        with patch.object(self.bot,'RISK_PER_TRADE',-.01):
+            self.assertEqual(self.bot.risk_permission(self.state['strategies']['EMA_SCALP'],self.time),(False,'INVALID_RISK_PER_TRADE'))
+
+    def test_stale_and_future_signals_are_blocked(self):
+        self.assertEqual(self.bot.entry_data_permission(self.time,self.time+pd.Timedelta(minutes=3)),(False,'STALE_SIGNAL'))
+        self.assertEqual(self.bot.entry_data_permission(self.time,self.time-pd.Timedelta(seconds=1)),(False,'FUTURE_SIGNAL'))
+        self.assertTrue(self.bot.entry_data_permission(self.time,self.time+pd.Timedelta(seconds=25))[0])
+
+    def test_soft_drawdown_reduces_default_risk(self):
+        account=self.state['strategies']['EMA_SCALP']
+        account.update(balance=465.,peak_balance=500.)
+        self.assertEqual(self.bot.effective_risk_pct(account),.0025)
+
     def test_short_deterioration_exits_at_available_close(self):
         self.enter('SHORT')
         self.manage(10000., 10010., 9920., 10005.)
