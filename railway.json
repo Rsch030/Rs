@@ -1,8 +1,12 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
-  "build": {"builder": "NIXPACKS"},
+  "build": {
+    "builder": "NIXPACKS"
+  },
   "deploy": {
-    "startCommand": "python bot.py",
+    "startCommand": "python -c \"import os; from pathlib import Path; p=Path(os.getenv('DATA_DIR','/data')); assert os.getenv('REQUIRE_EXISTING_STATE')!='true' or ((p/'MIGRATION_VERIFIED').is_file() and (p/'btc_v175_state.json').is_file()), 'Missing migrated BTC state'\" && python bot.py",
+    "healthcheckPath": "/health",
+    "healthcheckTimeout": 120,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   }
