@@ -1,0 +1,340 @@
+{
+  "from": "2026-08-07 16:40:00+00:00",
+  "until": "2026-10-06 16:45:00+00:00",
+  "holdout_from": "2026-09-29 16:40:00+00:00",
+  "notes": "Paper gross settlement, existing risk guards, flat closed positions only. Unclosed positions excluded. Cost sensitivity: 3.5bps fee + 1bp slippage each side. No parameter search; final 7 days separate.",
+  "baseline": {
+    "development": {
+      "trades": 1015,
+      "gross_R": -16.5204,
+      "cost_sensitivity_R": -319.0778,
+      "paper_pnl_eur": -40.96,
+      "winrate": 0.5005,
+      "profit_factor": 0.9615
+    },
+    "holdout": {
+      "trades": 106,
+      "gross_R": 1.9323,
+      "cost_sensitivity_R": -30.5889,
+      "paper_pnl_eur": -0.8,
+      "winrate": 0.5189,
+      "profit_factor": 1.0473
+    },
+    "total": {
+      "trades": 1121,
+      "gross_R": -14.5882,
+      "cost_sensitivity_R": -349.6667,
+      "paper_pnl_eur": -41.77,
+      "winrate": 0.5022,
+      "profit_factor": 0.969
+    },
+    "per_strategy": {
+      "SMC_SWEEP": {
+        "trades": 90,
+        "gross_R": 22.2713,
+        "cost_sensitivity_R": -7.3589,
+        "paper_pnl_eur": 58.02,
+        "winrate": 0.5889,
+        "profit_factor": 1.7035
+      },
+      "EMA_SCALP": {
+        "trades": 417,
+        "gross_R": -3.371,
+        "cost_sensitivity_R": -143.5103,
+        "paper_pnl_eur": -24.76,
+        "winrate": 0.53,
+        "profit_factor": 0.9809
+      },
+      "MOMENTUM": {
+        "trades": 230,
+        "gross_R": -12.3864,
+        "cost_sensitivity_R": -85.493,
+        "paper_pnl_eur": -25.69,
+        "winrate": 0.5043,
+        "profit_factor": 0.8808
+      },
+      "BREAKOUT": {
+        "trades": 128,
+        "gross_R": -15.0483,
+        "cost_sensitivity_R": -47.7237,
+        "paper_pnl_eur": -30.41,
+        "winrate": 0.3125,
+        "profit_factor": 0.6593
+      },
+      "TREND_PULLBACK": {
+        "trades": 240,
+        "gross_R": -0.541,
+        "cost_sensitivity_R": -54.6036,
+        "paper_pnl_eur": -5.23,
+        "winrate": 0.5333,
+        "profit_factor": 0.9948
+      },
+      "MEAN_REVERSION": {
+        "trades": 16,
+        "gross_R": -5.5128,
+        "cost_sensitivity_R": -10.9772,
+        "paper_pnl_eur": -13.69,
+        "winrate": 0.3125,
+        "profit_factor": 0.4581
+      }
+    },
+    "per_strategy_development": {
+      "SMC_SWEEP": {
+        "trades": 74,
+        "gross_R": 21.0894,
+        "cost_sensitivity_R": -3.1496,
+        "paper_pnl_eur": 54.84,
+        "winrate": 0.5946,
+        "profit_factor": 1.8273
+      },
+      "EMA_SCALP": {
+        "trades": 372,
+        "gross_R": -8.4489,
+        "cost_sensitivity_R": -133.0697,
+        "paper_pnl_eur": -28.55,
+        "winrate": 0.5242,
+        "profit_factor": 0.9474
+      },
+      "MOMENTUM": {
+        "trades": 230,
+        "gross_R": -12.3864,
+        "cost_sensitivity_R": -85.493,
+        "paper_pnl_eur": -25.69,
+        "winrate": 0.5043,
+        "profit_factor": 0.8808
+      },
+      "BREAKOUT": {
+        "trades": 112,
+        "gross_R": -13.8734,
+        "cost_sensitivity_R": -42.6734,
+        "paper_pnl_eur": -29.01,
+        "winrate": 0.3125,
+        "profit_factor": 0.6429
+      },
+      "TREND_PULLBACK": {
+        "trades": 213,
+        "gross_R": 0.6116,
+        "cost_sensitivity_R": -46.3648,
+        "paper_pnl_eur": -3.76,
+        "winrate": 0.5305,
+        "profit_factor": 1.0066
+      },
+      "MEAN_REVERSION": {
+        "trades": 14,
+        "gross_R": -3.5128,
+        "cost_sensitivity_R": -8.3273,
+        "paper_pnl_eur": -8.8,
+        "winrate": 0.3571,
+        "profit_factor": 0.5702
+      }
+    },
+    "per_strategy_holdout": {
+      "SMC_SWEEP": {
+        "trades": 16,
+        "gross_R": 1.1818,
+        "cost_sensitivity_R": -4.2093,
+        "paper_pnl_eur": 3.17,
+        "winrate": 0.5625,
+        "profit_factor": 1.1917
+      },
+      "EMA_SCALP": {
+        "trades": 45,
+        "gross_R": 5.0779,
+        "cost_sensitivity_R": -10.4406,
+        "paper_pnl_eur": 3.78,
+        "winrate": 0.5778,
+        "profit_factor": 1.3099
+      },
+      "MOMENTUM": {
+        "trades": 0,
+        "gross_R": 0.0,
+        "cost_sensitivity_R": 0.0
+      },
+      "BREAKOUT": {
+        "trades": 16,
+        "gross_R": -1.1749,
+        "cost_sensitivity_R": -5.0503,
+        "paper_pnl_eur": -1.4,
+        "winrate": 0.3125,
+        "profit_factor": 0.7794
+      },
+      "TREND_PULLBACK": {
+        "trades": 27,
+        "gross_R": -1.1526,
+        "cost_sensitivity_R": -8.2388,
+        "paper_pnl_eur": -1.47,
+        "winrate": 0.5556,
+        "profit_factor": 0.8951
+      },
+      "MEAN_REVERSION": {
+        "trades": 2,
+        "gross_R": -2.0,
+        "cost_sensitivity_R": -2.6499,
+        "paper_pnl_eur": -4.9,
+        "winrate": 0.0,
+        "profit_factor": 0.0
+      }
+    },
+    "open_positions": 0,
+    "worst_account_drawdown": -0.09078673113493274
+  },
+  "candidate": {
+    "development": {
+      "trades": 547,
+      "gross_R": 14.4199,
+      "cost_sensitivity_R": -155.3839,
+      "paper_pnl_eur": 29.94,
+      "winrate": 0.532,
+      "profit_factor": 1.0619
+    },
+    "holdout": {
+      "trades": 71,
+      "gross_R": 6.0735,
+      "cost_sensitivity_R": -17.2884,
+      "paper_pnl_eur": 6.42,
+      "winrate": 0.5634,
+      "profit_factor": 1.2268
+    },
+    "total": {
+      "trades": 618,
+      "gross_R": 20.4934,
+      "cost_sensitivity_R": -172.6723,
+      "paper_pnl_eur": 36.36,
+      "winrate": 0.5356,
+      "profit_factor": 1.0789
+    },
+    "per_strategy": {
+      "SMC_SWEEP": {
+        "trades": 90,
+        "gross_R": 22.2713,
+        "cost_sensitivity_R": -7.3589,
+        "paper_pnl_eur": 58.02,
+        "winrate": 0.5889,
+        "profit_factor": 1.7035
+      },
+      "EMA_SCALP": {
+        "trades": 417,
+        "gross_R": -3.371,
+        "cost_sensitivity_R": -143.5103,
+        "paper_pnl_eur": -24.76,
+        "winrate": 0.53,
+        "profit_factor": 0.9809
+      },
+      "MOMENTUM": {
+        "trades": 0,
+        "gross_R": 0.0,
+        "cost_sensitivity_R": 0.0
+      },
+      "BREAKOUT": {
+        "trades": 0,
+        "gross_R": 0.0,
+        "cost_sensitivity_R": 0.0
+      },
+      "TREND_PULLBACK": {
+        "trades": 111,
+        "gross_R": 1.5931,
+        "cost_sensitivity_R": -21.8031,
+        "paper_pnl_eur": 3.11,
+        "winrate": 0.5135,
+        "profit_factor": 1.0312
+      },
+      "MEAN_REVERSION": {
+        "trades": 0,
+        "gross_R": 0.0,
+        "cost_sensitivity_R": 0.0
+      }
+    },
+    "per_strategy_development": {
+      "SMC_SWEEP": {
+        "trades": 74,
+        "gross_R": 21.0894,
+        "cost_sensitivity_R": -3.1496,
+        "paper_pnl_eur": 54.84,
+        "winrate": 0.5946,
+        "profit_factor": 1.8273
+      },
+      "EMA_SCALP": {
+        "trades": 372,
+        "gross_R": -8.4489,
+        "cost_sensitivity_R": -133.0697,
+        "paper_pnl_eur": -28.55,
+        "winrate": 0.5242,
+        "profit_factor": 0.9474
+      },
+      "MOMENTUM": {
+        "trades": 0,
+        "gross_R": 0.0,
+        "cost_sensitivity_R": 0.0
+      },
+      "BREAKOUT": {
+        "trades": 0,
+        "gross_R": 0.0,
+        "cost_sensitivity_R": 0.0
+      },
+      "TREND_PULLBACK": {
+        "trades": 101,
+        "gross_R": 1.7793,
+        "cost_sensitivity_R": -19.1646,
+        "paper_pnl_eur": 3.65,
+        "winrate": 0.5149,
+        "profit_factor": 1.038
+      },
+      "MEAN_REVERSION": {
+        "trades": 0,
+        "gross_R": 0.0,
+        "cost_sensitivity_R": 0.0
+      }
+    },
+    "per_strategy_holdout": {
+      "SMC_SWEEP": {
+        "trades": 16,
+        "gross_R": 1.1818,
+        "cost_sensitivity_R": -4.2093,
+        "paper_pnl_eur": 3.17,
+        "winrate": 0.5625,
+        "profit_factor": 1.1917
+      },
+      "EMA_SCALP": {
+        "trades": 45,
+        "gross_R": 5.0779,
+        "cost_sensitivity_R": -10.4406,
+        "paper_pnl_eur": 3.78,
+        "winrate": 0.5778,
+        "profit_factor": 1.3099
+      },
+      "MOMENTUM": {
+        "trades": 0,
+        "gross_R": 0.0,
+        "cost_sensitivity_R": 0.0
+      },
+      "BREAKOUT": {
+        "trades": 0,
+        "gross_R": 0.0,
+        "cost_sensitivity_R": 0.0
+      },
+      "TREND_PULLBACK": {
+        "trades": 10,
+        "gross_R": -0.1862,
+        "cost_sensitivity_R": -2.6385,
+        "paper_pnl_eur": -0.54,
+        "winrate": 0.5,
+        "profit_factor": 0.9559
+      },
+      "MEAN_REVERSION": {
+        "trades": 0,
+        "gross_R": 0.0,
+        "cost_sensitivity_R": 0.0
+      }
+    },
+    "open_positions": 0,
+    "worst_account_drawdown": -0.07890075951849862
+  },
+  "baseline_commit": "909894ed653162aa6d5612b2c961e48f07eafdd4",
+  "candles_sha256": "5b46041f93edae3e90e16d8f7217fa73b0f4bb2a3122bb7ad71aab1fb3bd483f",
+  "limitations": [
+    "Warmup delays trading until approximately 2026-08-09; requested window begins 2026-08-07.",
+    "Exploratory strategy selection used these data; final seven days are a separate temporal slice, not an untouched validation set.",
+    "Flat round-trip cost sensitivity is not a rerun of equity and risk limits.",
+    "Candle OHLC cannot reproduce intrabar path, order fills, latency or funding."
+  ]
+}
