@@ -6,7 +6,7 @@ import requests
 import pandas as pd
 import numpy as np
 
-# BTC V1.7.7 RESEARCH — independent paper account per strategy
+# BTC V1.7.8 RESEARCH — independent paper account per strategy
 INST_ID = os.getenv('INST_ID', 'BTC-USDT')
 START_BALANCE = float(os.getenv('START_BALANCE', '500'))
 RISK_PER_TRADE = float(os.getenv('RISK_PER_TRADE', '0.005'))
@@ -57,14 +57,14 @@ CANDLES_FILE = os.path.join(DATA_DIR, 'btc_v175_candles_5m.csv')
 STRATEGIES = {
  'SMC_SWEEP': {'label':'Liquidity Sweep / Reversal','rr':2.5,'stop_atr':1.35,'max_hours':6,'enabled':True},
  'EMA_SCALP': {'label':'Trend Pullback / EMA Retest','rr':2.0,'stop_atr':1.25,'max_hours':4,'enabled':True},
- 'MOMENTUM': {'label':'Momentum Expansion','rr':2.2,'stop_atr':1.40,'max_hours':5,'enabled':True},
- 'BREAKOUT': {'label':'Breakout / Retest','rr':2.5,'stop_atr':1.70,'max_hours':8,'enabled':True},
+ 'MOMENTUM': {'label':'Momentum Expansion','rr':2.2,'stop_atr':1.40,'max_hours':5,'enabled':False},
+ 'BREAKOUT': {'label':'Breakout / Retest','rr':2.5,'stop_atr':1.70,'max_hours':8,'enabled':False},
  'TREND_PULLBACK': {'label':'HTF Trend Continuation','rr':2.5,'stop_atr':1.65,'max_hours':8,'enabled':True},
- 'MEAN_REVERSION': {'label':'Range Mean Reversion','rr':1.8,'stop_atr':1.45,'max_hours':5,'enabled':True},
+ 'MEAN_REVERSION': {'label':'Range Mean Reversion','rr':1.8,'stop_atr':1.45,'max_hours':5,'enabled':False},
 }
 
 
-session=requests.Session(); session.headers.update({'User-Agent':'BTC-V1/1.7.7-RESEARCH'})
+session=requests.Session(); session.headers.update({'User-Agent':'BTC-V1/1.7.8-RESEARCH'})
 state_lock=threading.RLock()
 store=SnapshotStore(STATE_FILE,state_lock)
 engine={'status':'starting','last_success':None,'last_candle_close':None,'error':None}
@@ -76,7 +76,7 @@ def finite(x):
 def strategy_default():
     return {'position':None,'balance':START_BALANCE,'peak_balance':START_BALANCE,'max_drawdown':0.0,'risk_day':None,'day_start_balance':START_BALANCE,'loss_streak':0,'cooldown_until':None,'scans':0,'signals':0,'blocked':0,'last_signal':'—','last_signal_time':None}
 def default_state():
-    return {'version':'BTC-V1.7.7-RESEARCH','created':utc_now().isoformat(),'last_processed_5m':None,'balance':START_BALANCE,'peak_balance':START_BALANCE,'max_drawdown':0.0,'total_trades':0,'winning_trades':0,'losing_trades':0,'gross_profit':0.0,'gross_loss':0.0,'global_loss_streak':0,'risk_day':None,'day_start_balance':START_BALANCE,'shadow_candidates':{},'strategies':{k:strategy_default() for k in STRATEGIES}}
+    return {'version':'BTC-V1.7.8-RESEARCH','created':utc_now().isoformat(),'last_processed_5m':None,'balance':START_BALANCE,'peak_balance':START_BALANCE,'max_drawdown':0.0,'total_trades':0,'winning_trades':0,'losing_trades':0,'gross_profit':0.0,'gross_loss':0.0,'global_loss_streak':0,'risk_day':None,'day_start_balance':START_BALANCE,'shadow_candidates':{},'strategies':{k:strategy_default() for k in STRATEGIES}}
 def normalize_state(s):
     base=default_state()
     legacy=s.get('version')=='BTC-V1.7.5-RESEARCH'
@@ -239,6 +239,10 @@ def router(key,side,snap):
     """
     state=snap.get('market_state'); direction=snap.get('direction'); strength=snap.get('strength')
     if state=='WARMUP': return False,'HARD_WARMUP'
+    # Continuation entries need an actual directional market. Reversals retain
+    # their own mandate; a constant detector score cannot overrule this gate.
+    if key in {'MOMENTUM','BREAKOUT','TREND_PULLBACK'} and state in {'RANGE_CHOP','CONTRACTION'}:
+        return False,'HARD_CONTINUATION_WITHOUT_TREND'
 
     # Mean reversion has a genuinely incompatible mandate outside ranges.
     if key=='MEAN_REVERSION' and state!='RANGE_CHOP':
@@ -349,10 +353,10 @@ def detect_breakout(d5,d15,d1,d4,snap):
     # Breakout detector is allowed to anticipate regime expansion: trigger quality is primary.
     long_break=p.close>hi and (p.close-hi)/a>=.08
     short_break=p.close<lo and (lo-p.close)/a>=.08
-    long_accept=long_break and c.low<=hi*1.0025 and c.close>hi and c.close>c.open and c.rsi>=50
-    short_accept=short_break and c.high>=lo*.9975 and c.close<lo and c.close<c.open and c.rsi<=50
-    if long_accept and vol>=.70:return 'LONG','BREAKOUT_RETEST_ACCEPTED',float(c.atr*1.65),25
-    if short_accept and vol>=.70:return 'SHORT','BREAKOUT_RETEST_ACCEPTED',float(c.atr*1.65),25
+    long_accept=long_break and hi-.5*a<=c.low<=hi+.25*a and 0<(c.close-hi)/a<=1.0 and c.close>c.open and c.rsi>=50
+    short_accept=short_break and lo-.25*a<=c.high<=lo+.5*a and 0<(lo-c.close)/a<=1.0 and c.close<c.open and c.rsi<=50
+    if long_accept and vol>=.70:return 'LONG','BREAKOUT_RETEST_ACCEPTED_V178',float(c.atr*1.65),25
+    if short_accept and vol>=.70:return 'SHORT','BREAKOUT_RETEST_ACCEPTED_V178',float(c.atr*1.65),25
     return None,'WAIT_BREAKOUT_ACCEPTANCE',None,0
 
 
@@ -360,12 +364,14 @@ def detect_trend_pullback(d5,d15,d1,d4,snap):
     c=d15.iloc[-1]; h=d1.iloc[-1]; recent=d15.iloc[-5:-1]
     bull=h.ema20>h.ema50 and h.ema20_slope3>0
     bear=h.ema20<h.ema50 and h.ema20_slope3<0
-    bull_touch=bool((recent.low<=recent.ema20*1.004).any())
-    bear_touch=bool((recent.high>=recent.ema20*.996).any())
-    bull_resume=c.close>c.open and c.close>c.ema9 and c.close>c.ema20 and c.rsi>=52
-    bear_resume=c.close<c.open and c.close<c.ema9 and c.close<c.ema20 and c.rsi<=48
-    if bull and bull_touch and bull_resume:return 'LONG','HTF_PULLBACK_CONFIRMED_RESUME',float(c.atr*1.70),24
-    if bear and bear_touch and bear_resume:return 'SHORT','HTF_PULLBACK_CONFIRMED_RESUME',float(c.atr*1.70),24
+    touch=(recent.low<=recent.ema20+.25*recent.atr)&(recent.high>=recent.ema20-.25*recent.atr)
+    bull_touch=bool((touch&(recent.close>=recent.ema20-.5*recent.atr)).any())
+    bear_touch=bool((touch&(recent.close<=recent.ema20+.5*recent.atr)).any())
+    p=d15.iloc[-2]
+    bull_resume=c.close>c.open and c.close>p.high and c.close>c.ema9 and 0<(c.close-c.ema20)/c.atr<=1.5 and c.rsi>=52
+    bear_resume=c.close<c.open and c.close<p.low and c.close<c.ema9 and 0<(c.ema20-c.close)/c.atr<=1.5 and c.rsi<=48
+    if bull and bull_touch and bull_resume:return 'LONG','HTF_PULLBACK_CONFIRMED_RESUME_V178',float(c.atr*1.70),24
+    if bear and bear_touch and bear_resume:return 'SHORT','HTF_PULLBACK_CONFIRMED_RESUME_V178',float(c.atr*1.70),24
     return None,'WAIT_HTF_PULLBACK_RESUMPTION',None,0
 
 
@@ -414,6 +420,10 @@ def signal_for(key,c,snap):
     if len(c)<600:return None
     d5,d15,d1,d4=frames(c)
     if min(len(d15),len(d1),len(d4))<200:return None
+    if key in {'BREAKOUT','TREND_PULLBACK'} and d5.index[-1]+pd.Timedelta(minutes=5)!=d15.index[-1]:
+        feat=base_features(key,None,'WAIT_NEW_15M_CLOSE',d5,d15,d1,d4,snap)
+        feat['schema_version']='6.1'
+        return {'signal':None,'time':d5.index[-1]+pd.Timedelta(minutes=5),'reason':'WAIT_NEW_15M_CLOSE','features':feat}
     side,setup,dist,trigger=DETECTORS[key](d5,d15,d1,d4,snap)
     feat=base_features(key,side,setup,d5,d15,d1,d4,snap); feat['schema_version']='6.1'
     if not side:return {'signal':None,'time':d5.index[-1]+pd.Timedelta(minutes=5),'reason':setup,'features':feat}
@@ -456,7 +466,7 @@ def signal_for(key,c,snap):
     feat['quality_pass']=bool(detector_quality>=LIVE_MIN_QUALITY)
     feat['soft_context_mismatch']=bool(soft_mismatch)
     if RESEARCH_MODE:
-        # V1.7.7: estimated costs are logged for signal analysis, but do not censor a
+        # V1.7.8: estimated costs are logged for signal analysis, but do not censor a
         # technically valid paper-research signal. This lets us measure whether the cost
         # hypothesis truly separates good/bad trades instead of throwing the sample away.
         allowed=(not hard_context) and detector_quality>=LIVE_MIN_QUALITY and (not soft_mismatch or detector_quality>=SOFT_CONTEXT_MIN_QUALITY)
@@ -507,7 +517,9 @@ def is_cooldown(s,now=None):
     return True
 
 def open_risk(state):
-    accounts=[state['strategies'][k] for k,cfg in STRATEGIES.items() if cfg['enabled']]
+    # Previously opened positions and balances remain part of the portfolio,
+    # including accounts that now only collect shadow candidates.
+    accounts=[state['strategies'][k] for k in STRATEGIES]
     balance=sum(float(a.get('balance',START_BALANCE)) for a in accounts)
     risk=sum(float(a['position']['risk_eur']) for a in accounts if a.get('position'))
     return risk/balance if balance>0 else 0.0
@@ -693,7 +705,7 @@ def check_position(key,state,s,candle):
 
 def stats(state):
     # Aggregate display only; execution/risk remains completely strategy-isolated.
-    live=[state['strategies'][k] for k,cfg in STRATEGIES.items() if cfg['enabled']]
+    live=[state['strategies'][k] for k in STRATEGIES]
     n_accounts=max(len(live),1)
     combined_balance=sum(float(a.get('balance',START_BALANCE)) for a in live)
     combined_start=START_BALANCE*n_accounts
@@ -761,10 +773,10 @@ def regime_performance():
         print('[WARN] regime performance',repr(exc),flush=True)
         return []
 
-DASH='''<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="20"><title>BTC V1.7.7 Quant Research</title><style>
+DASH='''<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="20"><title>BTC V1.7.8 Quant Research</title><style>
 :root{--bg:#0b0e13;--card:#151922;--card2:#10141c;--line:#2a3140;--text:#f5f7fb;--muted:#8e98aa;--green:#55d68b;--red:#ff6b72;--amber:#f3c969}*{box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);margin:0;padding:14px}.w{max-width:1250px;margin:auto}.top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:8px 2px 16px}.title{font-size:34px;font-weight:900}.sub,.muted{color:var(--muted)}.running{font-size:12px;padding:6px 9px;border-radius:999px;background:#153222;color:var(--green);font-weight:800}.grid{display:grid;grid-template-columns:repeat(6,1fr);gap:9px}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:13px}.label{font-size:11px;color:var(--muted);text-transform:uppercase}.value{font-size:24px;font-weight:850;margin-top:4px}.mini{font-size:12px;margin-top:3px}.pos{color:var(--green)!important}.neg{color:var(--red)!important}.amber{color:var(--amber)!important}.section{margin-top:10px}.section h2{font-size:16px;margin:0 0 10px}.market{display:grid;grid-template-columns:1.4fr repeat(4,1fr);gap:9px}.tag{display:inline-block;padding:4px 7px;border-radius:999px;font-size:10px}.live{background:#153222;color:var(--green)}.shadow{background:#332d18;color:var(--amber)}.tablewrap{overflow-x:auto;-webkit-overflow-scrolling:touch}table{width:100%;border-collapse:collapse;font-size:12px;white-space:nowrap}td,th{padding:9px 8px;border-bottom:1px solid var(--line);text-align:left}th{color:var(--muted);font-size:10px;text-transform:uppercase}.strategy{font-weight:750}.pill{padding:3px 6px;border-radius:6px;background:#242b39;font-size:10px}.two{display:grid;grid-template-columns:1.35fr 1fr;gap:10px}.empty{padding:18px;text-align:center;color:var(--muted);background:var(--card2);border-radius:10px}.downloads{display:flex;gap:8px;flex-wrap:wrap}.btn{color:var(--text);text-decoration:none;background:#242b39;border:1px solid #343d4f;border-radius:9px;padding:8px 10px;font-size:12px}.small{font-size:10px}
 @media(max-width:900px){.grid{grid-template-columns:repeat(3,1fr)}.market{grid-template-columns:repeat(3,1fr)}.two{grid-template-columns:1fr}}@media(max-width:520px){body{padding:10px}.grid{grid-template-columns:repeat(2,1fr)}.market{grid-template-columns:repeat(2,1fr)}.market>div:first-child{grid-column:span 2}.card{padding:11px}.value{font-size:21px}}
-</style></head><body><div class="w"><div class="top"><div><div class="title">BTC V1</div><div class="sub">Control Center · independent strategy accounts · paper trading · costs uit voor nieuwe trades · refresh 20s</div></div><div class="running">● {{engine.status|upper}}</div></div>
+</style></head><body><div class="w"><div class="top"><div><div class="title">BTC V1.7.8</div><div class="sub">Control Center · independent strategy accounts · paper trading · costs uit voor nieuwe trades · SHADOW: alleen meten, geen nieuwe accounttrades · refresh 20s</div></div><div class="running">● {{engine.status|upper}}</div></div>
 <div class="grid">
 <div class="card"><div class="label">Combined realized balances</div><div class="value {{'pos' if s.return_pct>=0 else 'neg'}}">€{{'%.2f'|format(s.balance)}}</div><div class="mini">{{'%+.2f'|format(s.return_pct)}}%</div></div>
 <div class="card"><div class="label">Net P/L</div><div class="value {{'pos' if s.net_pnl>=0 else 'neg'}}">€{{'%+.2f'|format(s.net_pnl)}}</div><div class="mini">{{'%+.2f'|format(s.net_r)}}R totaal</div></div>
@@ -812,7 +824,7 @@ def dashboard():
     return render_template_string(DASH,s=stats(st),r=r,risk_per_trade=RISK_PER_TRADE,engine=engine_status(),strat=strategy_dashboard(st),openpos=open_positions_dashboard(st,price),decisions=_read_csv_records(DECISIONS_FILE,36),regimes=regime_performance(),recent=recent())
 @app.get('/api/status')
 def status():
-    st=load_state(); c=load_candles(); return jsonify({'version':'BTC-V1.7.7-RESEARCH','run_mode':RUN_MODE,'paper_costs_charged':False,'loss_guards_active':True,'risk_per_trade':RISK_PER_TRADE,'reentry_pause_minutes':REENTRY_PAUSE_MINUTES,'engine':engine_status(),'decision_funnel':decision_funnel(),'stats':stats(st),'regime':regime_snapshot(c),'strategies':STRATEGIES})
+    st=load_state(); c=load_candles(); return jsonify({'version':'BTC-V1.7.8-RESEARCH','run_mode':RUN_MODE,'paper_costs_charged':False,'loss_guards_active':True,'risk_per_trade':RISK_PER_TRADE,'reentry_pause_minutes':REENTRY_PAUSE_MINUTES,'engine':engine_status(),'decision_funnel':decision_funnel(),'stats':stats(st),'regime':regime_snapshot(c),'strategies':STRATEGIES})
 def dl(path,name):
     if not os.path.exists(path):return {'error':'Nog geen bestand.'},404
     return send_file(path,mimetype='text/csv',as_attachment=True,download_name=name)
@@ -836,13 +848,13 @@ def engine_status():
 @app.get('/health')
 def health():
     status=engine_status()
-    return {'status':status['status'],'version':'BTC-V1.7.7-RESEARCH','run_mode':RUN_MODE,'engine':status,'risk_per_trade':RISK_PER_TRADE},200 if status['status']=='running' else 503
+    return {'status':status['status'],'version':'BTC-V1.7.8-RESEARCH','run_mode':RUN_MODE,'engine':status,'risk_per_trade':RISK_PER_TRADE},200 if status['status']=='running' else 503
 
 def run_dashboard():app.run(host='0.0.0.0',port=int(os.getenv('PORT','8080')),threaded=True,use_reloader=False)
 
 def main():
     state=load_state()
-    threading.Thread(target=run_dashboard,daemon=True).start();print(f'BTC V1.7.7 RESEARCH — PAPER ONLY — mode={RUN_MODE} — auditable research accounts — cost estimates measured / paper deductions disabled — risk/trade={RISK_PER_TRADE:.2%}',flush=True)
+    threading.Thread(target=run_dashboard,daemon=True).start();print(f'BTC V1.7.8 RESEARCH — PAPER ONLY — mode={RUN_MODE} — auditable research accounts — cost estimates measured / paper deductions disabled — risk/trade={RISK_PER_TRADE:.2%}',flush=True)
     candles=update_candles(load_candles())
     while True:
         try:

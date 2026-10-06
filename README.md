@@ -1,4 +1,4 @@
-# BTC V1.7.7 RESEARCH
+# BTC V1.7.8 RESEARCH
 
 Paper-trading/research build with six independent strategy accounts.
 
@@ -9,7 +9,7 @@ past deductions are not refunded. The dashboard and `/api/status` identify
 this policy (`paper_costs_charged: false`).
 
 ## Included
-- `bot.py` — BTC V1.7.7 research bot
+- `bot.py` — BTC V1.7.8 research bot
 - `storage.py` — recoverable state snapshots and CSV export journal
 - `requirements.txt` — Python dependencies
 - `railway.json` — Railway deployment configuration
@@ -21,7 +21,7 @@ this policy (`paper_costs_charged: false`).
 4. Deploy the service.
 5. Mount a persistent Railway volume at `/data` (or set `DATA_DIR` to its mount path).
 6. Run exactly one service replica/process per data directory.
-7. Confirm the startup logs identify **BTC V1.7.7 RESEARCH**.
+7. Confirm the startup logs identify **BTC V1.7.8 RESEARCH**.
 
 ## Correctness changes
 - OKX candle timestamps represent the open. Higher timeframes now use the correct
@@ -70,9 +70,25 @@ it excludes web/HTTP dependencies and skips Flask integration.
 - Signals older than max(120 seconds, three polling intervals) cannot open trades.
 - Historical losses remain visible; paper costs policy from main is preserved.
 
-## Current deployment status (2026-10-05)
-GitHub write access has been restored and these changes are proposed on a branch.
-Railway currently runs an older build and has no persistent volume on trade-bot.
-Before merging or deploying, preserve the actual running state and complete data
-directory and migrate them to a persistent volume. Public CSV exports are not a
-complete restorable snapshot. These changes are not yet active on the dashboard.
+## Deployment configuration (2026-10-06)
+The BTC service tracks `Rsch030/Rs` main and uses one replica with the persistent
+500 MB `btc-bot-data` volume mounted at `/data`. `REQUIRE_EXISTING_STATE=true`
+prevents an empty deployment from silently resetting the accounts. The original
+pre-update migration archive is retained on the volume. Keep this volume and its
+state/export journal together when backing up; public CSV exports are incomplete.
+
+## V1.7.8 strategy policy
+- PAPER: SMC_SWEEP, EMA_SCALP and TREND_PULLBACK. EMA and sweep entry rules stay unchanged.
+- SHADOW: MOMENTUM, BREAKOUT and MEAN_REVERSION. They collect candidate outcomes
+  without opening new account trades. Previously open positions still receive
+  normal exit management, and all six account balances/losses remain visible.
+- Trend pullbacks require a real candle overlap with an ATR-scaled EMA20 zone,
+  a close beyond the previous candle high/low, and a maximum 1.5 ATR extension.
+- Trend, momentum and breakout continuations cannot override range/contraction context.
+- Fifteen-minute trend/breakout setups are evaluated only at a newly confirmed
+  fifteen-minute close. Breakout retests use an ATR-scaled level zone in shadow mode.
+- Risk, exit management, persistence and the existing paper cost policy remain as above.
+
+See `research/RESULTS-v178.md` and `research/replay-v178.json` for the exploratory
+comparison and limitations. A better gross paper replay does not establish
+profitability with execution costs or future data.

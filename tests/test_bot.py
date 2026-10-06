@@ -89,6 +89,62 @@ class BotTests(unittest.TestCase):
         account.update(balance=480.,risk_day=self.time.date().isoformat(),day_start_balance=500.)
         self.assertEqual(self.bot.risk_permission(account,self.time),(False,'STRATEGY_DAILY_LOSS_LIMIT'))
 
+    def test_continuations_cannot_override_range_context(self):
+        for key in ['MOMENTUM','BREAKOUT','TREND_PULLBACK']:
+            for state in ['RANGE_CHOP','CONTRACTION']:
+                self.assertEqual(self.bot.router(key,'LONG',{'market_state':state,'direction':'BULL','strength':'WEAK'}),
+                                 (False,'HARD_CONTINUATION_WITHOUT_TREND'))
+        self.assertTrue(self.bot.router('SMC_SWEEP','SHORT',{'market_state':'CONTRACTION','direction':'BULL','strength':'WEAK'})[0])
+        self.assertTrue(self.bot.router('MEAN_REVERSION','LONG',{'market_state':'RANGE_CHOP','direction':'NEUTRAL','strength':'WEAK'})[0])
+
+    def detector_frame(self, count=16, **changes):
+        row=dict(open=10000.,high=10020.,low=9980.,close=10000.,atr=100.,ema9=10010.,
+                 ema20=10000.,ema21=10000.,ema50=9900.,ema20_slope3=.001,rsi=55.,volume_ratio=1.2)
+        row.update(changes)
+        return pd.DataFrame([row.copy() for _ in range(count)],index=pd.date_range('2026-10-01',periods=count,freq='15min',tz='UTC'))
+
+    def test_trend_pullback_requires_touch_confirmation_and_no_chasing(self):
+        d=self.detector_frame()
+        for k,v in dict(open=10020.,close=10050.,high=10060.,low=10010.).items():d.loc[d.index[-1],k]=v
+        self.assertEqual(self.bot.detect_trend_pullback(d,d,d,d,{})[0],'LONG')
+        # Percent-based tolerance accepted these bars above the EMA band.
+        for k,v in dict(low=10035.,high=10060.,close=10050.).items():d.loc[d.index[-5:-1],k]=v
+        d.loc[d.index[-1],'close']=10080.
+        self.assertIsNone(self.bot.detect_trend_pullback(d,d,d,d,{})[0])
+        d.loc[d.index[-2],'low']=10000.
+        d.loc[d.index[-1],'close']=10200.
+        self.assertIsNone(self.bot.detect_trend_pullback(d,d,d,d,{})[0])
+
+    def test_shadow_accounts_keep_history_balances_and_open_risk(self):
+        account=self.state['strategies']['MOMENTUM']
+        account.update(balance=350.,position={'risk_eur':12.})
+        self.assertFalse(self.bot.STRATEGIES['MOMENTUM']['enabled'])
+        self.assertEqual(self.bot.stats(self.state)['balance'],2850.)
+        self.assertEqual(self.bot.stats(self.state)['net_pnl'],-150.)
+        self.assertAlmostEqual(self.bot.open_risk(self.state),12/2850)
+
+    def test_breakout_requires_a_retest_at_the_level(self):
+        d=self.detector_frame(high=10000.,low=9950.)
+        for k,v in dict(open=10000.,close=10030.,high=10040.,low=9990.).items():d.loc[d.index[-2],k]=v
+        for k,v in dict(open=10010.,close=10050.,high=10060.,low=10010.).items():d.loc[d.index[-1],k]=v
+        self.assertEqual(self.bot.detect_breakout(d,d,d,d,{})[0],'LONG')
+        # Prior percent tolerance would call this a retest although it is 2 ATR away.
+        for k,v in dict(open=10200.,close=10220.,high=10230.,low=10190.).items():d.loc[d.index[-1],k]=v
+        self.assertIsNone(self.bot.detect_breakout(d,d,d,d,{})[0])
+
+    def test_fifteen_minute_setups_wait_for_a_new_closed_bar(self):
+        data=candles('2026-08-01T00:00:00Z',10080)
+        fs=self.bot.frames(data)
+        snap={'regime':'TEST','direction':'BULL','strength':'MEDIUM','market_state':'TREND'}
+        # A 5m close five minutes after the last closed 15m bar cannot reuse it.
+        shifted=data.copy();shifted.timestamp=shifted.timestamp+pd.Timedelta(minutes=5)
+        with patch.object(self.bot,'frames',return_value=(self.bot.enrich(shifted.set_index('timestamp')),fs[1],fs[2],fs[3])):
+            for key in ['BREAKOUT','TREND_PULLBACK']:
+                with patch.dict(self.bot.DETECTORS,{key:lambda *args:('LONG','TEST',100.,25)}):
+                    sig=self.bot.signal_for(key,shifted,snap)
+                    self.assertIsNone(sig['signal'])
+                    self.assertEqual(sig['reason'],'WAIT_NEW_15M_CLOSE')
+
     def test_research_hard_drawdown_is_enforced(self):
         account=self.state['strategies']['EMA_SCALP']
         account.update(balance=450.,peak_balance=500.)
