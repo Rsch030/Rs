@@ -9,12 +9,13 @@ export interface Candle {
 }
 
 export type Signal = "BUY" | "SELL" | "HOLD";
-export type ExitReason = "SMA_CROSS" | "STOP_LOSS";
+export type ExitReason = "SMA_CROSS" | "STOP_LOSS" | "TAKE_PROFIT";
 
 export interface Position {
   entryPrice: number;
   quantity: number;
   stopPrice: number;
+  takeProfitPrice: number;
   entryTime: number;
   entryFee: number;
 }
@@ -40,6 +41,7 @@ export interface BotConfig {
   riskFraction: number;
   maxExposureFraction: number;
   stopAtrMultiple: number;
+  takeProfitRMultiple: number;
   feeRate: number;
   pollMilliseconds: number;
 }
@@ -53,6 +55,7 @@ export const DEFAULT_CONFIG: BotConfig = {
   riskFraction: 0.01,
   maxExposureFraction: 0.25,
   stopAtrMultiple: 2,
+  takeProfitRMultiple: 1.5,
   feeRate: 0.001,
   pollMilliseconds: 15_000,
 };

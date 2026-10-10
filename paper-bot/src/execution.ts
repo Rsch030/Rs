@@ -19,11 +19,16 @@ export class PaperAccount {
   process(candles: Candle[], index: number, signal: Signal, atr: number | null): string | null {
     const candle = candles[index]!;
     if (this.position) {
-      // Check the protective stop before the close-based crossover on each completed bar.
+      // If a candle spans both levels, assume the stop was hit first (conservative fill ordering).
       if (candle.low <= this.position.stopPrice) {
         const fillPrice = Math.min(candle.open, this.position.stopPrice);
         this.close(fillPrice, candle.closeTime, "STOP_LOSS");
         return `STOP_LOSS @ ${money(fillPrice)}`;
+      }
+      if (candle.high >= this.position.takeProfitPrice) {
+        const fillPrice = Math.max(candle.open, this.position.takeProfitPrice);
+        this.close(fillPrice, candle.closeTime, "TAKE_PROFIT");
+        return `TAKE_PROFIT @ ${money(fillPrice)}`;
       }
       if (signal === "SELL") {
         this.close(candle.close, candle.closeTime, "SMA_CROSS");
@@ -45,9 +50,10 @@ export class PaperAccount {
     this.cash -= cost + entryFee;
     this.position = {
       entryPrice: candle.close, quantity: sized.quantity, stopPrice: sized.stopPrice,
+      takeProfitPrice: candle.close + (candle.close - sized.stopPrice) * this.config.takeProfitRMultiple,
       entryTime: candle.closeTime, entryFee,
     };
-    return `BUY ${sized.quantity.toFixed(6)} @ ${money(candle.close)} (stop ${money(sized.stopPrice)}; planned risk ${money(sized.expectedStopLoss)})`;
+    return `BUY ${sized.quantity.toFixed(6)} @ ${money(candle.close)} (stop ${money(sized.stopPrice)}; TP ${money(this.position.takeProfitPrice)}; planned risk ${money(sized.expectedStopLoss)})`;
   }
 
   private close(exitPrice: number, exitTime: number, reason: ExitReason): void {
