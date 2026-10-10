@@ -45,7 +45,7 @@ export interface BotConfig {
 }
 
 export const DEFAULT_CONFIG: BotConfig = {
-  symbol: "BTCUSDT",
+  symbol: "BTC-USD",
   interval: "5m",
   fastPeriod: 9,
   slowPeriod: 21,

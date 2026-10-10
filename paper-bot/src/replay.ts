@@ -31,7 +31,7 @@ const firstSlow = simpleMovingAverage(candles.map((c) => c.close), config.slowPe
 const buyAndHold = ((finalCandle.close / firstCandle.close) - 1) * 100;
 
 console.log(`Paper replay — ${config.symbol} ${config.interval}, ${config.fastPeriod}/${config.slowPeriod} SMA`);
-console.log(`Real Binance closed candles: ${candles.length} (${formatTime(firstCandle.closeTime)} to ${formatTime(finalCandle.closeTime)})`);
+console.log(`Real Coinbase closed candles: ${candles.length} (${formatTime(firstCandle.closeTime)} to ${formatTime(finalCandle.closeTime)})`);
 console.log(`Starting balance: ${money(config.initialBalance)} | fee assumption: ${(config.feeRate * 100).toFixed(3)}% per side`);
 console.log(`Final marked equity: ${money(finalEquity)} | return: ${netReturn.toFixed(2)}% | max drawdown: ${(peakAndDrawdown.max * 100).toFixed(2)}%`);
 console.log(`Closed trades: ${account.trades.length} | wins: ${winners} | realized net P&L: ${money(closedNet)} | open position: ${account.position ? `${account.position.quantity.toFixed(6)} BTC` : "none"}`);

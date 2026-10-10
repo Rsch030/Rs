@@ -10,6 +10,7 @@ let lastCloseTime = 0;
 let failures = 0;
 
 console.log(`Paper-only ${config.symbol} ${config.interval} bot — ${config.fastPeriod}/${config.slowPeriod} SMA crossover`);
+console.log("Market candles: Coinbase Exchange public API.");
 console.log(`Starting paper balance ${money(config.initialBalance)}. No exchange credentials or order endpoint are used.`);
 console.log("Position and paper balance exist only in memory; restarting this process resets them.");
 

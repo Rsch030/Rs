@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "A BTCUSDT paper-trading bot using real Binance candles and a 9/21 SMA crossover.",
+  "description": "A BTC-USD paper-trading bot using real Coinbase candles and a 9/21 SMA crossover.",
   "engines": { "node": ">=22.6" },
   "scripts": {
     "paper": "node --experimental-strip-types src/bot.ts",
