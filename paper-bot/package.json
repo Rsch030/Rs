@@ -1,0 +1,18 @@
+{
+  "name": "btc-paper-trading-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A BTCUSDT paper-trading bot using real Binance candles and a 9/21 SMA crossover.",
+  "engines": { "node": ">=22.6" },
+  "scripts": {
+    "paper": "node --experimental-strip-types src/bot.ts",
+    "once": "node --experimental-strip-types src/bot.ts --once",
+    "replay": "node --experimental-strip-types src/replay.ts",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}
