@@ -24,7 +24,7 @@ The replay reports the actual candle date range, paper account result, fees, tra
 
 At each newly closed candle, the bot fetches up to 600 real candles and compares five SMA pairs (3/8, 5/13, 7/16, 9/21, and 12/26) by replaying them on the most recent 40% of that window. The selected pair maximizes net paper return after the configured fees, with a drawdown penalty, and must have at least two completed validation trades. Until then it uses 5/13 while collecting samples. The newest candle is excluded from selection and used only to calculate the live paper signal.
 
-This is rolling parameter selection, not a predictive AI model. It is recalculated on real market history, does not persist learned state between restarts, models fees but not spread or slippage, and can still lose money. The dashboard shows the current pair, validation trade count, window size, and score. All positions remain paper-only and use the same 1% planned stop risk, 25% exposure cap, ATR stop, and fee-aware take profit.
+This is rolling parameter selection, not a predictive AI model. It is recalculated on real market history, models fees but not spread or slippage, and can still lose money. The dashboard shows the current pair, validation trade count, window size, and score. All positions remain paper-only and use the same 1% planned stop risk, 25% exposure cap, ATR stop, and fee-aware take profit.
 
 ## Paper risk and state
 
@@ -34,7 +34,7 @@ This is rolling parameter selection, not a predictive AI model. It is recalculat
 - Position sizing: planned stop risk is capped at 1% of marked equity, with notional exposure capped at 25% of equity.
 - Assumed paper fee: 0.1% on each side. This is configurable because actual venue fees vary.
 - A closed candle that touches the stop exits at the stop, or at the candle open if the market opened below it. The fee-adjusted 1.5R net take-profit exits at its target, or at the candle open if the market opened above it. Stop is checked first if one candle spans both levels; otherwise take-profit is checked before a same-candle crossover exit.
-- Position, balance, and trades are held in memory only. Restarting resets the paper account; no ledger or learned memory is written.
+- Paper balance, open position (including entry, stop, and take-profit), completed trades, last processed candle, and selected learner profile are written atomically to `PAPER_STATE_FILE` (default `./data/paper-state.json`). On Railway, mount a persistent volume at `/data` and set `PAPER_STATE_FILE=/data/paper-state.json`. The state is validated on startup; incompatible or corrupt state stops startup instead of silently resetting the account. The last 5,000 trades are retained, with a lifetime trade count.
 
 ## Optional environment settings
 

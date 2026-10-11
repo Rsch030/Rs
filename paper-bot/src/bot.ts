@@ -2,6 +2,7 @@ import { PaperAccount, money } from "./execution.ts";
 import { startDashboard } from "./dashboard.ts";
 import { learnStrategy } from "./learner.ts";
 import { fetchCandles, formatTime } from "./market.ts";
+import { loadPaperState, savePaperState, stateFilePath, type PersistedPaperState } from "./persistence.ts";
 import { averageTrueRange, crossoverSignal, simpleMovingAverage } from "./strategy.ts";
 import { configFromEnvironment } from "./types.ts";
 
@@ -18,6 +19,42 @@ let latestCandles: Awaited<ReturnType<typeof fetchCandles>> = [];
 let lastSignal: "BUY" | "SELL" | "HOLD" = "HOLD";
 let lastAction: string | null = null;
 const startedAt = new Date().toISOString();
+const persistentStatePath = stateFilePath();
+let stateDirty = false;
+
+function snapshotState(): PersistedPaperState {
+  return {
+    version: 1,
+    symbol: config.symbol,
+    interval: config.interval,
+    initialBalance: config.initialBalance,
+    feeRate: config.feeRate,
+    cash: account.cash,
+    position: account.position,
+    trades: account.trades.slice(-5_000),
+    completedTradeCount: account.completedTradeCount,
+    lastCloseTime,
+    lastSignal,
+    lastAction,
+    strategyChoice,
+  };
+}
+
+const savedState = await loadPaperState(persistentStatePath, config);
+if (savedState) {
+  account.cash = savedState.cash;
+  account.position = savedState.position;
+  account.trades.push(...savedState.trades);
+  account.completedTradeCount = savedState.completedTradeCount;
+  lastCloseTime = savedState.lastCloseTime;
+  lastSignal = savedState.lastSignal;
+  lastAction = savedState.lastAction;
+  strategyChoice = savedState.strategyChoice;
+  console.log(`Restored persistent paper account from ${persistentStatePath}: equity and position retained; ${account.completedTradeCount} completed trades.`);
+} else {
+  await savePaperState(persistentStatePath, snapshotState());
+  console.log(`Created persistent paper account at ${persistentStatePath}.`);
+}
 
 startDashboard(() => {
   const latest = latestCandles.at(-1);
@@ -43,6 +80,7 @@ startDashboard(() => {
     equity: account.equity(markPrice),
     position,
     unrealizedPnl: position ? (markPrice - position.entryPrice) * position.quantity : 0,
+    completedTrades: account.completedTradeCount,
     trades: account.trades.slice(-10),
   };
 });
@@ -60,6 +98,10 @@ do {
     lastError = null;
     lastSuccessAt = new Date().toISOString();
     latestCandles = recentCandles;
+    if (stateDirty) {
+      await savePaperState(persistentStatePath, snapshotState());
+      stateDirty = false;
+    }
     const recentIndex = recentCandles.length - 1;
     if (recentIndex < 0) throw new Error("Coinbase returned no closed candles.");
     const newestCloseTime = recentCandles[recentIndex]!.closeTime;
@@ -74,7 +116,6 @@ do {
       const candle = candles[index]!;
       strategyChoice = learnStrategy(candles.slice(0, index), config);
       latestCandles = candles;
-      lastCloseTime = candle.closeTime;
       const closes = candles.map((item) => item.close);
       const fast = simpleMovingAverage(closes, strategyChoice.fastPeriod);
       const slow = simpleMovingAverage(closes, strategyChoice.slowPeriod);
@@ -83,6 +124,10 @@ do {
       const action = account.process(candles, index, signal, averageTrueRange(candles, 14, index));
       lastSignal = signal;
       lastAction = `${strategyChoice.status === "adaptive" ? "Adaptief" : "Leren"} SMA ${strategyChoice.fastPeriod}/${strategyChoice.slowPeriod} · ${action ?? signal}`;
+      lastCloseTime = candle.closeTime;
+      stateDirty = true;
+      await savePaperState(persistentStatePath, snapshotState());
+      stateDirty = false;
       console.log(`${formatTime(candle.closeTime)} | close ${money(candle.close)} | SMA${strategyChoice.fastPeriod} ${money(fast)} / SMA${strategyChoice.slowPeriod} ${money(slow)} | ${strategyChoice.status} (${strategyChoice.validationTrades} validatietrades) | ${signal}${action ? ` — ${action}` : ""} | equity ${money(account.equity(candle.close))}`);
     }
     if (once) break;

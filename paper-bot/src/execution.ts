@@ -5,6 +5,7 @@ export class PaperAccount {
   cash: number;
   position: Position | null = null;
   readonly trades: CompletedTrade[] = [];
+  completedTradeCount = 0;
   readonly config: BotConfig;
 
   constructor(config: BotConfig) {
@@ -72,6 +73,8 @@ export class PaperAccount {
       quantity: position.quantity, grossPnl, fees: position.entryFee + exitFee,
       netPnl: grossPnl - position.entryFee - exitFee, reason,
     });
+    this.completedTradeCount++;
+    if (this.trades.length > 5_000) this.trades.splice(0, this.trades.length - 5_000);
     this.position = null;
   }
 }
