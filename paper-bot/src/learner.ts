@@ -12,15 +12,17 @@ export interface StrategyChoice {
   windowCandles: number;
 }
 
-// Include faster pairs so the paper bot can explore more signals, while still
-// comparing them with the original and slower SMA profiles.
-const CANDIDATES = [
+// Use short lookbacks so the paper bot can react to more 5-minute crossovers.
+// Fee-adjusted replay still decides which of these profiles is retained.
+export const STRATEGY_PROFILES = [
+  { fastPeriod: 2, slowPeriod: 5 },
+  { fastPeriod: 3, slowPeriod: 7 },
   { fastPeriod: 3, slowPeriod: 8 },
+  { fastPeriod: 4, slowPeriod: 9 },
   { fastPeriod: 5, slowPeriod: 13 },
-  { fastPeriod: 7, slowPeriod: 16 },
-  { fastPeriod: 9, slowPeriod: 21 },
-  { fastPeriod: 12, slowPeriod: 26 },
 ] as const;
+
+const CANDIDATES = STRATEGY_PROFILES;
 
 const VALIDATION_FRACTION = 0.4;
 const MIN_VALIDATION_TRADES = 2;
@@ -32,7 +34,7 @@ const MIN_VALIDATION_TRADES = 2;
  * information from that candle.
  */
 export function learnStrategy(candles: Candle[], config: BotConfig): StrategyChoice {
-  const fallback = CANDIDATES[1]; // Faster than the original 9/21 while collecting samples.
+  const fallback = CANDIDATES[2]; // Faster 3/8 profile while collecting enough real samples.
   const validationStart = Math.floor(candles.length * (1 - VALIDATION_FRACTION));
   const validationCandles = Math.max(0, candles.length - validationStart);
 

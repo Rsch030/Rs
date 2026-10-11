@@ -18,6 +18,8 @@ export interface Position {
   takeProfitPrice: number;
   entryTime: number;
   entryFee: number;
+  fastPeriod: number;
+  slowPeriod: number;
 }
 
 export interface CompletedTrade {

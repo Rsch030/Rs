@@ -4,13 +4,13 @@ import type { StrategyChoice } from "./learner.ts";
 import type { BotConfig, CompletedTrade, Position, Signal } from "./types.ts";
 
 export interface PersistedPaperState {
-  version: 1;
+  version: 2;
   symbol: string;
   interval: string;
   initialBalance: number;
   feeRate: number;
   cash: number;
-  position: Position | null;
+  positions: Position[];
   trades: CompletedTrade[];
   completedTradeCount: number;
   lastCloseTime: number;
@@ -38,22 +38,27 @@ export async function loadPaperState(path: string, config: BotConfig): Promise<P
   } catch {
     throw new Error(`Paper state at ${path} is not valid JSON; it was left untouched.`);
   }
-  if (!isRecord(value) || value.version !== 1) {
+  if (!isRecord(value) || (value.version !== 1 && value.version !== 2)) {
     throw new Error(`Paper state at ${path} has an unsupported format; it was left untouched.`);
   }
   if (value.symbol !== config.symbol || value.interval !== config.interval || value.initialBalance !== config.initialBalance || value.feeRate !== config.feeRate) {
     throw new Error(`Paper state at ${path} belongs to different market, starting-balance, or fee settings; it was left untouched.`);
   }
+  const positions = value.version === 1
+    ? (value.position === null ? [] : [{ ...value.position as object, fastPeriod: numberOr(value.strategyChoice, "fastPeriod", 3), slowPeriod: numberOr(value.strategyChoice, "slowPeriod", 8) }])
+    : value.positions;
   if (!isFiniteNumber(value.cash) || value.cash < 0 || !isFiniteNumber(value.completedTradeCount)
     || value.completedTradeCount < 0 || !Number.isInteger(value.completedTradeCount)
     || !isFiniteNumber(value.lastCloseTime) || value.lastCloseTime < 0
     || !isSignal(value.lastSignal) || !(typeof value.lastAction === "string" || value.lastAction === null)
-    || !isPosition(value.position) || !Array.isArray(value.trades) || value.trades.length > 5_000
+    || !Array.isArray(positions) || positions.length > 3 || !positions.every(isPosition)
+    || (value.version === 1 && !isLegacyPosition(value.position))
+    || !Array.isArray(value.trades) || value.trades.length > 5_000
     || !value.trades.every(isCompletedTrade) || !isStrategyChoice(value.strategyChoice)) {
     throw new Error(`Paper state at ${path} failed validation; it was left untouched.`);
   }
 
-  return value as unknown as PersistedPaperState;
+  return { ...value, version: 2, positions } as unknown as PersistedPaperState;
 }
 
 export async function savePaperState(path: string, state: PersistedPaperState): Promise<void> {
@@ -76,8 +81,8 @@ function isSignal(value: unknown): value is Signal {
   return value === "BUY" || value === "SELL" || value === "HOLD";
 }
 
-function isPosition(value: unknown): value is Position | null {
-  if (value === null) return true;
+function isPosition(value: unknown): value is Position {
+  if (value === null) return false;
   if (!isRecord(value)) return false;
   return ["entryPrice", "quantity", "stopPrice", "takeProfitPrice", "entryTime", "entryFee"]
     .every((key) => isFiniteNumber(value[key]))
@@ -86,7 +91,23 @@ function isPosition(value: unknown): value is Position | null {
     && (value.stopPrice as number) > 0
     && (value.stopPrice as number) < (value.entryPrice as number)
     && (value.takeProfitPrice as number) > (value.entryPrice as number)
-    && (value.entryFee as number) >= 0;
+    && (value.entryFee as number) >= 0
+    && Number.isInteger(value.fastPeriod) && (value.fastPeriod as number) > 0
+    && Number.isInteger(value.slowPeriod) && (value.slowPeriod as number) > (value.fastPeriod as number);
+}
+
+function isLegacyPosition(value: unknown): value is Omit<Position, "fastPeriod" | "slowPeriod"> | null {
+  if (value === null) return true;
+  if (!isRecord(value)) return false;
+  return ["entryPrice", "quantity", "stopPrice", "takeProfitPrice", "entryTime", "entryFee"]
+    .every((key) => isFiniteNumber(value[key]))
+    && (value.entryPrice as number) > 0 && (value.quantity as number) > 0
+    && (value.stopPrice as number) > 0 && (value.stopPrice as number) < (value.entryPrice as number)
+    && (value.takeProfitPrice as number) > (value.entryPrice as number) && (value.entryFee as number) >= 0;
+}
+
+function numberOr(value: unknown, key: string, fallback: number): number {
+  return isRecord(value) && Number.isInteger(value[key]) && (value[key] as number) > 0 ? value[key] as number : fallback;
 }
 
 function isCompletedTrade(value: unknown): value is CompletedTrade {

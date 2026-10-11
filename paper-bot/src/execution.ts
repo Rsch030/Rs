@@ -3,7 +3,7 @@ import type { BotConfig, Candle, CompletedTrade, ExitReason, Position, Signal } 
 
 export class PaperAccount {
   cash: number;
-  position: Position | null = null;
+  readonly positions: Position[] = [];
   readonly trades: CompletedTrade[] = [];
   completedTradeCount = 0;
   readonly config: BotConfig;
@@ -14,56 +14,72 @@ export class PaperAccount {
   }
 
   equity(markPrice: number): number {
-    return this.cash + (this.position ? this.position.quantity * markPrice : 0);
+    return this.cash + this.positions.reduce((total, position) => total + position.quantity * markPrice, 0);
   }
 
-  process(candles: Candle[], index: number, signal: Signal, atr: number | null): string | null {
+  process(candles: Candle[], index: number, signal: Signal | StrategySignal[], atr: number | null): string | null {
     const candle = candles[index]!;
-    if (this.position) {
-      // If a candle spans both levels, assume the stop was hit first (conservative fill ordering).
-      if (candle.low <= this.position.stopPrice) {
-        const fillPrice = Math.min(candle.open, this.position.stopPrice);
-        this.close(fillPrice, candle.closeTime, "STOP_LOSS");
-        return `STOP_LOSS @ ${money(fillPrice)}`;
+    const signals: StrategySignal[] = typeof signal === "string"
+      ? [{ fastPeriod: this.config.fastPeriod, slowPeriod: this.config.slowPeriod, signal }]
+      : signal;
+    const signalByProfile = new Map(signals.map((item) => [profileKey(item.fastPeriod, item.slowPeriod), item.signal]));
+    const actions: string[] = [];
+
+    // Manage each open profile independently. If a candle spans both exits, assume
+    // the stop was hit first (conservative fill ordering).
+    for (const position of [...this.positions]) {
+      let reason: ExitReason | null = null;
+      let fillPrice = candle.close;
+      if (candle.low <= position.stopPrice) {
+        reason = "STOP_LOSS";
+        fillPrice = Math.min(candle.open, position.stopPrice);
+      } else if (candle.high >= position.takeProfitPrice) {
+        reason = "TAKE_PROFIT";
+        fillPrice = Math.max(candle.open, position.takeProfitPrice);
+      } else if (signalByProfile.get(profileKey(position.fastPeriod, position.slowPeriod)) === "SELL") {
+        reason = "SMA_CROSS";
       }
-      if (candle.high >= this.position.takeProfitPrice) {
-        const fillPrice = Math.max(candle.open, this.position.takeProfitPrice);
-        this.close(fillPrice, candle.closeTime, "TAKE_PROFIT");
-        return `TAKE_PROFIT @ ${money(fillPrice)}`;
+      if (reason) {
+        this.close(position, fillPrice, candle.closeTime, reason);
+        actions.push(`${reason} SMA${position.fastPeriod}/${position.slowPeriod} @ ${money(fillPrice)}`);
       }
-      if (signal === "SELL") {
-        this.close(candle.close, candle.closeTime, "SMA_CROSS");
-        return `SELL @ ${money(candle.close)}`;
-      }
-      return null;
     }
 
-    if (signal !== "BUY" || atr === null) return null;
-    const sized = sizePosition({
-      equity: this.equity(candle.close), cash: this.cash, entryPrice: candle.close, atr,
-      riskFraction: this.config.riskFraction, maxExposureFraction: this.config.maxExposureFraction,
-      stopAtrMultiple: this.config.stopAtrMultiple, feeRate: this.config.feeRate,
-    });
-    if (!sized) return null;
-    const cost = sized.quantity * candle.close;
-    const entryFee = cost * this.config.feeRate;
-    if (cost + entryFee > this.cash) return null;
-    this.cash -= cost + entryFee;
-    const feeRate = this.config.feeRate;
-    const takeProfitPrice = (candle.close * (1 + feeRate)
-      + (candle.close - sized.stopPrice) * this.config.takeProfitRMultiple)
-      / (1 - feeRate);
-    this.position = {
-      entryPrice: candle.close, quantity: sized.quantity, stopPrice: sized.stopPrice,
-      takeProfitPrice,
-      entryTime: candle.closeTime, entryFee,
-    };
-    return `BUY ${sized.quantity.toFixed(6)} @ ${money(candle.close)} (stop ${money(sized.stopPrice)}; net TP ${money(this.position.takeProfitPrice)}; target ${this.config.takeProfitRMultiple}R after estimated fees; planned risk ${money(sized.expectedStopLoss)})`;
+    if (atr === null || this.positions.length >= MAX_OPEN_POSITIONS) return actions.length ? actions.join("; ") : null;
+
+    // Divide the existing portfolio risk and exposure limits over three slots.
+    // This allows concurrent positions without tripling the account's risk budget.
+    const perSlotRisk = this.config.riskFraction / MAX_OPEN_POSITIONS;
+    const perSlotExposure = this.config.maxExposureFraction / MAX_OPEN_POSITIONS;
+    for (const setup of signals) {
+      if (setup.signal !== "BUY" || this.positions.length >= MAX_OPEN_POSITIONS) continue;
+      if (this.positions.some((position) => position.fastPeriod === setup.fastPeriod && position.slowPeriod === setup.slowPeriod)) continue;
+      const sized = sizePosition({
+        equity: this.equity(candle.close), cash: this.cash, entryPrice: candle.close, atr,
+        riskFraction: perSlotRisk, maxExposureFraction: perSlotExposure,
+        stopAtrMultiple: this.config.stopAtrMultiple, feeRate: this.config.feeRate,
+      });
+      if (!sized) continue;
+      const cost = sized.quantity * candle.close;
+      const entryFee = cost * this.config.feeRate;
+      if (cost + entryFee > this.cash) continue;
+      this.cash -= cost + entryFee;
+      const feeRate = this.config.feeRate;
+      const takeProfitPrice = (candle.close * (1 + feeRate)
+        + (candle.close - sized.stopPrice) * this.config.takeProfitRMultiple)
+        / (1 - feeRate);
+      const position: Position = {
+        entryPrice: candle.close, quantity: sized.quantity, stopPrice: sized.stopPrice,
+        takeProfitPrice, entryTime: candle.closeTime, entryFee,
+        fastPeriod: setup.fastPeriod, slowPeriod: setup.slowPeriod,
+      };
+      this.positions.push(position);
+      actions.push(`BUY SMA${setup.fastPeriod}/${setup.slowPeriod} ${sized.quantity.toFixed(6)} @ ${money(candle.close)} (SL ${money(sized.stopPrice)}; TP ${money(takeProfitPrice)}; risk ${money(sized.expectedStopLoss)})`);
+    }
+    return actions.length ? actions.join("; ") : null;
   }
 
-  private close(exitPrice: number, exitTime: number, reason: ExitReason): void {
-    const position = this.position;
-    if (!position) return;
+  private close(position: Position, exitPrice: number, exitTime: number, reason: ExitReason): void {
     const proceeds = position.quantity * exitPrice;
     const exitFee = proceeds * this.config.feeRate;
     this.cash += proceeds - exitFee;
@@ -75,8 +91,21 @@ export class PaperAccount {
     });
     this.completedTradeCount++;
     if (this.trades.length > 5_000) this.trades.splice(0, this.trades.length - 5_000);
-    this.position = null;
+    const index = this.positions.indexOf(position);
+    if (index >= 0) this.positions.splice(index, 1);
   }
+}
+
+export const MAX_OPEN_POSITIONS = 3;
+
+export interface StrategySignal {
+  fastPeriod: number;
+  slowPeriod: number;
+  signal: Signal;
+}
+
+function profileKey(fastPeriod: number, slowPeriod: number): string {
+  return `${fastPeriod}/${slowPeriod}`;
 }
 
 export function money(value: number): string {
