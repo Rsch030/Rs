@@ -48,12 +48,16 @@ export class PaperAccount {
     const entryFee = cost * this.config.feeRate;
     if (cost + entryFee > this.cash) return null;
     this.cash -= cost + entryFee;
+    const feeRate = this.config.feeRate;
+    const takeProfitPrice = (candle.close * (1 + feeRate)
+      + (candle.close - sized.stopPrice) * this.config.takeProfitRMultiple)
+      / (1 - feeRate);
     this.position = {
       entryPrice: candle.close, quantity: sized.quantity, stopPrice: sized.stopPrice,
-      takeProfitPrice: candle.close + (candle.close - sized.stopPrice) * this.config.takeProfitRMultiple,
+      takeProfitPrice,
       entryTime: candle.closeTime, entryFee,
     };
-    return `BUY ${sized.quantity.toFixed(6)} @ ${money(candle.close)} (stop ${money(sized.stopPrice)}; TP ${money(this.position.takeProfitPrice)}; planned risk ${money(sized.expectedStopLoss)})`;
+    return `BUY ${sized.quantity.toFixed(6)} @ ${money(candle.close)} (stop ${money(sized.stopPrice)}; net TP ${money(this.position.takeProfitPrice)}; target ${this.config.takeProfitRMultiple}R after estimated fees; planned risk ${money(sized.expectedStopLoss)})`;
   }
 
   private close(exitPrice: number, exitTime: number, reason: ExitReason): void {

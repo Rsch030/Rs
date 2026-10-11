@@ -24,10 +24,10 @@ The replay reports the actual candle date range, paper account result, fees, tra
 
 - Starting paper balance: 10,000 USD.
 - Planned stop: 2 × 14-period ATR below entry.
-- Take-profit: 1.5R above entry, where 1R is the entry-to-stop distance (3 × ATR with the default stop).
+- Take-profit: the price is calculated to target 1.5R net after the configured entry and exit fees. With the default 2 × ATR stop, that is farther than a gross 3 × ATR target.
 - Position sizing: planned stop risk is capped at 1% of marked equity, with notional exposure capped at 25% of equity.
 - Assumed paper fee: 0.1% on each side. This is configurable because actual venue fees vary.
-- A closed candle that touches the stop exits at the stop, or at the candle open if the market opened below it. The 1.5R take-profit exits at its target, or at the candle open if the market opened above it. Stop is checked first if one candle spans both levels; otherwise take-profit is checked before a same-candle crossover exit.
+- A closed candle that touches the stop exits at the stop, or at the candle open if the market opened below it. The fee-adjusted 1.5R net take-profit exits at its target, or at the candle open if the market opened above it. Stop is checked first if one candle spans both levels; otherwise take-profit is checked before a same-candle crossover exit.
 - Position, balance, and trades are held in memory only. Restarting resets the paper account; no ledger or learned memory is written.
 
 ## Optional environment settings
