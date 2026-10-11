@@ -50,7 +50,7 @@ if (savedState) {
   lastSignal = savedState.lastSignal;
   lastAction = savedState.lastAction;
   strategyChoice = savedState.strategyChoice;
-  console.log(`Restored persistent paper account from ${persistentStatePath}: equity and position retained; ${account.completedTradeCount} completed trades.`);
+  console.log(`Restored persistent paper account from ${persistentStatePath}: equity and ${account.positions.length} open positions retained; ${account.completedTradeCount} completed trades.`);
 } else {
   await savePaperState(persistentStatePath, snapshotState());
   console.log(`Created persistent paper account at ${persistentStatePath}.`);
@@ -130,7 +130,7 @@ do {
       const action = account.process(candles, index, signals, averageTrueRange(candles, 14, index));
       lastSignal = signals.some((item) => item.signal === "BUY") ? "BUY"
         : signals.some((item) => item.signal === "SELL") ? "SELL" : "HOLD";
-      lastAction = `${strategyChoice.status === "adaptive" ? "Adaptief" : "Leren"} SMA ${strategyChoice.fastPeriod}/${strategyChoice.slowPeriod} · ${action ?? signal}`;
+      lastAction = `${strategyChoice.status === "adaptive" ? "Adaptief" : "Leren"} SMA ${strategyChoice.fastPeriod}/${strategyChoice.slowPeriod} · ${action ?? lastSignal}`;
       lastCloseTime = candle.closeTime;
       stateDirty = true;
       await savePaperState(persistentStatePath, snapshotState());
