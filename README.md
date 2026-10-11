@@ -1,94 +1,43 @@
-# BTC V1.7.8 RESEARCH
+# BTC paper-trading bot
 
-Paper-trading/research build with six independent strategy accounts.
+A paper-only BTC bot. It reads **closed, real BTC-USD candles from Coinbase Exchange's public market-data API** and uses an adaptive simple-moving-average crossover. It sends no orders and needs no exchange key.
 
-New paper trades settle without fee or slippage deductions: `net_R = raw_R`
-and the account receives the gross P/L. Configured cost estimates still guide
-signal sizing and management. Historical trades and balances are preserved;
-past deductions are not refunded. The dashboard and `/api/status` identify
-this policy (`paper_costs_charged: false`).
+## Run
 
-## Included
-- `bot.py` — BTC V1.7.8 research bot
-- `storage.py` — recoverable state snapshots and CSV export journal
-- `requirements.txt` — Python dependencies
-- `railway.json` — Railway deployment configuration
+Requires Node.js 22.6 or newer. The bot needs network access to Coinbase Exchange's public market-data endpoint.
 
-## Deploy
-1. Create a new GitHub repository.
-2. Put all files from this package in the repository root.
-3. Connect that repository to Railway.
-4. Deploy the service.
-5. Mount a persistent Railway volume at `/data` (or set `DATA_DIR` to its mount path).
-6. Run exactly one service replica/process per data directory.
-7. Confirm the startup logs identify **BTC V1.7.8 RESEARCH**.
-
-## Correctness changes
-- OKX candle timestamps represent the open. Higher timeframes now use the correct
-  boundaries; entry and exit timestamps use the confirmed five-minute close.
-- Stops activated after a close take effect on subsequent candles. If deterioration
-  would place a stop through the current price, the trade exits at the current close.
-  Gaps through active stops fill at the adverse candle open.
-- Missing candles after downtime are backfilled. Incomplete history blocks processing.
-- A snapshot commits account state and pending CSV rows together. Interrupted exports
-  recover once on restart. An unreadable snapshot stops the engine instead of silently
-  resetting balances. Keep the entire data directory together when making backups.
-- Regime statistics, RSI edge cases, aggregate risk, and zero-return trade costs are corrected.
-- `/health` returns HTTP 503 while starting, after an engine error, or with stale data.
-
-The `btc_v175_*` filenames remain unchanged so existing accounts can resume. Legacy
-open-position and shadow entry times are shifted forward five minutes once during
-upgrade. Historical closed trades are preserved, and new export rows use schema `6.1`.
-For a clean comparison of corrected results, use a new `DATA_DIR`; do not combine
-old and corrected research samples as if they came from the same execution model.
-
-## Tests
 ```sh
-pip install -r requirements.txt
-python -m unittest discover -s tests -v
+npm install
+npm run paper     # poll for new closed 5-minute candles
+npm run once      # inspect one latest closed candle
+npm run replay    # replay up to 1,000 real candles and print measured results
+npm run check     # TypeScript type check
 ```
-GitHub Actions runs the suite, including Flask routes, with the pinned dependencies.
-An explicit `RS_TEST_CORE_ONLY=1` mode supports offline core regression checks;
-it excludes web/HTTP dependencies and skips Flask integration.
 
-## Important
-- PAPER/RESEARCH use only.
-- Profitability is not guaranteed.
-- API keys, tokens, `.env` files and other secrets are intentionally not included.
-- Environment variables/secrets, if required for your own deployment, must be configured separately in Railway.
-- Keep research datasets from different bot versions separate.
+## Railway
 
+`railway.json` configures Railway to run `npm run paper` as a continuously running worker and restart it after failures. It has no HTTP health endpoint because it is a candle-polling worker. Deploy the project from a GitHub repository with this directory as the service root. Railway's restart controls can then restart the paper worker and its logs can be checked remotely.
 
-## V1.7.7 loss controls
-- Default risk is 0.5% per trade, reduced to at most 0.25% after 6% drawdown.
-- Both RESEARCH and production enforce the 3% daily realized loss limit and
-  9% hard realized drawdown limit. Limits can be exceeded by an already open trade
-  or a stop gap; they block new entries, not retroactively cap losses.
-- Three consecutive losses pause the strategy for eight hours. An existing legacy
-  losing streak receives one pause on its next entry evaluation.
-- Every exit blocks re-entry for 15 minutes (REENTRY_PAUSE_MINUTES, minimum five).
-- Signals older than max(120 seconds, three polling intervals) cannot open trades.
-- Historical losses remain visible; paper costs policy from main is preserved.
+The replay reports the actual candle date range, paper account result, fees, trade count, drawdown, and a same-window buy-and-hold comparison. It does not generate candles or fill gaps with fixture data. Coinbase network/API errors are shown as errors; no performance result is fabricated.
 
-## Deployment configuration (2026-10-06)
-The BTC service tracks `Rsch030/Rs` main and uses one replica with the persistent
-500 MB `btc-bot-data` volume mounted at `/data`. `REQUIRE_EXISTING_STATE=true`
-prevents an empty deployment from silently resetting the accounts. The original
-pre-update migration archive is retained on the volume. Keep this volume and its
-state/export journal together when backing up; public CSV exports are incomplete.
+## Adaptive paper strategy
 
-## V1.7.8 strategy policy
-- PAPER: SMC_SWEEP, EMA_SCALP and TREND_PULLBACK. EMA and sweep entry rules stay unchanged.
-- SHADOW: MOMENTUM, BREAKOUT and MEAN_REVERSION. They collect candidate outcomes
-  without opening new account trades. Previously open positions still receive
-  normal exit management, and all six account balances/losses remain visible.
-- Trend pullbacks require a real candle overlap with an ATR-scaled EMA20 zone,
-  a close beyond the previous candle high/low, and a maximum 1.5 ATR extension.
-- Trend, momentum and breakout continuations cannot override range/contraction context.
-- Fifteen-minute trend/breakout setups are evaluated only at a newly confirmed
-  fifteen-minute close. Breakout retests use an ATR-scaled level zone in shadow mode.
-- Risk, exit management, persistence and the existing paper cost policy remain as above.
+At each newly closed candle, the bot fetches up to 600 real candles and compares five faster SMA pairs (2/5, 3/7, 3/8, 4/9, and 5/13) by replaying them on the most recent 40% of that window. The selected pair maximizes net paper return after the configured fees, with a drawdown penalty, and must have at least two completed validation trades. Until then it uses 3/8 while collecting samples. These shorter periods can create more entry signals but can also increase fee drag and false signals. The newest candle is excluded from selection and used only to calculate the live paper signal.
 
-See `research/RESULTS-v178.md` and `research/replay-v178.json` for the exploratory
-comparison and limitations. A better gross paper replay does not establish
-profitability with execution costs or future data.
+This is rolling parameter selection, not a predictive AI model. It is recalculated on real market history, models fees but not spread or slippage, and can still lose money. The dashboard shows the current pair, validation trade count, window size, and score. All positions remain paper-only and use the same 1% planned stop risk, 25% exposure cap, ATR stop, and fee-aware take profit.
+
+## Paper risk and state
+
+- Starting paper balance: 10,000 USD.
+- Planned stop: 2 × 14-period ATR below entry.
+- Take-profit: the price is calculated to target 1.5R net after the configured entry and exit fees. With the default 2 × ATR stop, that is farther than a gross 3 × ATR target.
+- Position sizing: planned stop risk is capped at 1% of marked equity, with notional exposure capped at 25% of equity.
+- Assumed paper fee: 0.1% on each side. This is configurable because actual venue fees vary.
+- A closed candle that touches the stop exits at the stop, or at the candle open if the market opened below it. The fee-adjusted 1.5R net take-profit exits at its target, or at the candle open if the market opened above it. Stop is checked first if one candle spans both levels; otherwise take-profit is checked before a same-candle crossover exit.
+- Paper balance, open position (including entry, stop, and take-profit), completed trades, last processed candle, and selected learner profile are written atomically to `PAPER_STATE_FILE` (default `./data/paper-state.json`). On Railway, mount a persistent volume at `/data` and set `PAPER_STATE_FILE=/data/paper-state.json`. The state is validated on startup; incompatible or corrupt state stops startup instead of silently resetting the account. The last 5,000 trades are retained, with a lifetime trade count.
+
+## Optional environment settings
+
+`SYMBOL`, `INTERVAL`, `INITIAL_BALANCE`, `PAPER_FEE_RATE`, and `POLL_MILLISECONDS` can override defaults. For example, `SYMBOL=BTC-USD INTERVAL=5m npm run once`. Coinbase supports `1m`, `5m`, `15m`, `1h`, `6h`, and `1d`; each request returns at most 300 candles, so longer replays are paged. The strategy periods and paper risk settings are source constants in this initial version.
+
+Historical replay results are an observation of the fetched candles, not a forecast or live trading result. This project is paper-only.
