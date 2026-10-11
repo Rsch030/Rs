@@ -1,6 +1,6 @@
 # BTC paper-trading bot
 
-A first paper-only version of the requested BTC bot. It reads **closed, real BTC-USD candles from Coinbase Exchange's public market-data API** and uses a 9/21 simple moving-average crossover: BUY on an upward cross, SELL on a downward cross, otherwise HOLD. It sends no orders and needs no exchange key.
+A paper-only BTC bot. It reads **closed, real BTC-USD candles from Coinbase Exchange's public market-data API** and uses an adaptive simple-moving-average crossover. It sends no orders and needs no exchange key.
 
 ## Run
 
@@ -19,6 +19,12 @@ npm run check     # TypeScript type check
 `railway.json` configures Railway to run `npm run paper` as a continuously running worker and restart it after failures. It has no HTTP health endpoint because it is a candle-polling worker. Deploy the project from a GitHub repository with this directory as the service root. Railway's restart controls can then restart the paper worker and its logs can be checked remotely.
 
 The replay reports the actual candle date range, paper account result, fees, trade count, drawdown, and a same-window buy-and-hold comparison. It does not generate candles or fill gaps with fixture data. Coinbase network/API errors are shown as errors; no performance result is fabricated.
+
+## Adaptive paper strategy
+
+At each newly closed candle, the bot fetches up to 600 real candles and compares five SMA pairs (3/8, 5/13, 7/16, 9/21, and 12/26) by replaying them on the most recent 40% of that window. The selected pair maximizes net paper return after the configured fees, with a drawdown penalty, and must have at least two completed validation trades. Until then it uses 5/13 while collecting samples. The newest candle is excluded from selection and used only to calculate the live paper signal.
+
+This is rolling parameter selection, not a predictive AI model. It is recalculated on real market history, does not persist learned state between restarts, models fees but not spread or slippage, and can still lose money. The dashboard shows the current pair, validation trade count, window size, and score. All positions remain paper-only and use the same 1% planned stop risk, 25% exposure cap, ATR stop, and fee-aware take profit.
 
 ## Paper risk and state
 

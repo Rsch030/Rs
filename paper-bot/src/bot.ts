@@ -1,5 +1,6 @@
 import { PaperAccount, money } from "./execution.ts";
 import { startDashboard } from "./dashboard.ts";
+import { learnStrategy } from "./learner.ts";
 import { fetchCandles, formatTime } from "./market.ts";
 import { averageTrueRange, crossoverSignal, simpleMovingAverage } from "./strategy.ts";
 import { configFromEnvironment } from "./types.ts";
@@ -7,6 +8,7 @@ import { configFromEnvironment } from "./types.ts";
 const config = configFromEnvironment();
 const once = process.argv.includes("--once");
 const account = new PaperAccount(config);
+let strategyChoice = learnStrategy([], config);
 let lastCloseTime = 0;
 let failures = 0;
 let lastAttemptAt: string | null = null;
@@ -33,8 +35,9 @@ startDashboard(() => {
     candles: latestCandles.slice(-60),
     signal: lastSignal,
     lastAction,
-    sma9: simpleMovingAverage(closes, config.fastPeriod),
-    sma21: simpleMovingAverage(closes, config.slowPeriod),
+    smaFast: simpleMovingAverage(closes, strategyChoice.fastPeriod),
+    smaSlow: simpleMovingAverage(closes, strategyChoice.slowPeriod),
+    strategyChoice,
     initialBalance: config.initialBalance,
     cash: account.cash,
     equity: account.equity(markPrice),
@@ -44,7 +47,7 @@ startDashboard(() => {
   };
 });
 
-console.log(`Paper-only ${config.symbol} ${config.interval} bot — ${config.fastPeriod}/${config.slowPeriod} SMA crossover`);
+console.log(`Paper-only ${config.symbol} ${config.interval} bot — adaptive SMA crossover (3/8, 5/13, 7/16, 9/21, 12/26)`);
 console.log("Market candles: Coinbase Exchange public API.");
 console.log(`Starting paper balance ${money(config.initialBalance)}. No exchange credentials or order endpoint are used.`);
 console.log("Position and paper balance exist only in memory; restarting this process resets them.");
@@ -52,24 +55,35 @@ console.log("Position and paper balance exist only in memory; restarting this pr
 do {
   try {
     lastAttemptAt = new Date().toISOString();
-    const candles = await fetchCandles(config.symbol, config.interval, 100);
+    const recentCandles = await fetchCandles(config.symbol, config.interval, 100);
     failures = 0;
     lastError = null;
     lastSuccessAt = new Date().toISOString();
-    latestCandles = candles;
-    const index = candles.length - 1;
-    if (index < config.slowPeriod) throw new Error("Not enough closed candles to calculate the moving averages.");
-    const candle = candles[index]!;
-    if (candle.closeTime !== lastCloseTime) {
+    latestCandles = recentCandles;
+    const recentIndex = recentCandles.length - 1;
+    if (recentIndex < 0) throw new Error("Coinbase returned no closed candles.");
+    const newestCloseTime = recentCandles[recentIndex]!.closeTime;
+    if (newestCloseTime !== lastCloseTime) {
+      // Refresh a larger real-candle window once per new closed candle. The
+      // newest candle is held out of learning and used only for this signal.
+      const candles = await fetchCandles(config.symbol, config.interval, 600);
+      const index = candles.length - 1;
+      if (index < 0 || candles[index]!.closeTime !== newestCloseTime) {
+        throw new Error("The learning window did not include the newest closed candle.");
+      }
+      const candle = candles[index]!;
+      strategyChoice = learnStrategy(candles.slice(0, index), config);
+      latestCandles = candles;
       lastCloseTime = candle.closeTime;
       const closes = candles.map((item) => item.close);
-      const fast = simpleMovingAverage(closes, config.fastPeriod)!;
-      const slow = simpleMovingAverage(closes, config.slowPeriod)!;
-      const signal = crossoverSignal(candles, config.fastPeriod, config.slowPeriod, index);
+      const fast = simpleMovingAverage(closes, strategyChoice.fastPeriod);
+      const slow = simpleMovingAverage(closes, strategyChoice.slowPeriod);
+      if (fast === null || slow === null) throw new Error("Not enough closed candles for the selected SMA profile.");
+      const signal = crossoverSignal(candles, strategyChoice.fastPeriod, strategyChoice.slowPeriod, index);
       const action = account.process(candles, index, signal, averageTrueRange(candles, 14, index));
       lastSignal = signal;
-      lastAction = action ?? signal;
-      console.log(`${formatTime(candle.closeTime)} | close ${money(candle.close)} | SMA${config.fastPeriod} ${money(fast)} / SMA${config.slowPeriod} ${money(slow)} | ${signal}${action ? ` — ${action}` : ""} | equity ${money(account.equity(candle.close))}`);
+      lastAction = `${strategyChoice.status === "adaptive" ? "Adaptief" : "Leren"} SMA ${strategyChoice.fastPeriod}/${strategyChoice.slowPeriod} · ${action ?? signal}`;
+      console.log(`${formatTime(candle.closeTime)} | close ${money(candle.close)} | SMA${strategyChoice.fastPeriod} ${money(fast)} / SMA${strategyChoice.slowPeriod} ${money(slow)} | ${strategyChoice.status} (${strategyChoice.validationTrades} validatietrades) | ${signal}${action ? ` — ${action}` : ""} | equity ${money(account.equity(candle.close))}`);
     }
     if (once) break;
   } catch (error) {
