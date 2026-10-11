@@ -14,13 +14,15 @@ export interface StrategyChoice {
 
 // Use short lookbacks so the paper bot can react to more 5-minute crossovers.
 // Fee-adjusted replay still decides which of these profiles is retained.
-const CANDIDATES = [
+export const STRATEGY_PROFILES = [
   { fastPeriod: 2, slowPeriod: 5 },
   { fastPeriod: 3, slowPeriod: 7 },
   { fastPeriod: 3, slowPeriod: 8 },
   { fastPeriod: 4, slowPeriod: 9 },
   { fastPeriod: 5, slowPeriod: 13 },
 ] as const;
+
+const CANDIDATES = STRATEGY_PROFILES;
 
 const VALIDATION_FRACTION = 0.4;
 const MIN_VALIDATION_TRADES = 2;

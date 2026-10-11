@@ -1,6 +1,6 @@
 import { PaperAccount, money } from "./execution.ts";
 import { startDashboard } from "./dashboard.ts";
-import { learnStrategy } from "./learner.ts";
+import { learnStrategy, STRATEGY_PROFILES } from "./learner.ts";
 import { fetchCandles, formatTime } from "./market.ts";
 import { loadPaperState, savePaperState, stateFilePath, type PersistedPaperState } from "./persistence.ts";
 import { averageTrueRange, crossoverSignal, simpleMovingAverage } from "./strategy.ts";
@@ -24,13 +24,13 @@ let stateDirty = false;
 
 function snapshotState(): PersistedPaperState {
   return {
-    version: 1,
+    version: 2,
     symbol: config.symbol,
     interval: config.interval,
     initialBalance: config.initialBalance,
     feeRate: config.feeRate,
     cash: account.cash,
-    position: account.position,
+    positions: account.positions,
     trades: account.trades.slice(-5_000),
     completedTradeCount: account.completedTradeCount,
     lastCloseTime,
@@ -43,7 +43,7 @@ function snapshotState(): PersistedPaperState {
 const savedState = await loadPaperState(persistentStatePath, config);
 if (savedState) {
   account.cash = savedState.cash;
-  account.position = savedState.position;
+  account.positions.push(...savedState.positions);
   account.trades.push(...savedState.trades);
   account.completedTradeCount = savedState.completedTradeCount;
   lastCloseTime = savedState.lastCloseTime;
@@ -59,7 +59,7 @@ if (savedState) {
 startDashboard(() => {
   const latest = latestCandles.at(-1);
   const closes = latestCandles.map((item) => item.close);
-  const position = account.position;
+  const position = account.positions[0] ?? null;
   const markPrice = latest?.close ?? position?.entryPrice ?? 0;
   return {
     symbol: config.symbol,
@@ -79,7 +79,8 @@ startDashboard(() => {
     cash: account.cash,
     equity: account.equity(markPrice),
     position,
-    unrealizedPnl: position ? (markPrice - position.entryPrice) * position.quantity : 0,
+    positions: account.positions,
+    unrealizedPnl: account.positions.reduce((total, item) => total + (markPrice - item.entryPrice) * item.quantity, 0),
     completedTrades: account.completedTradeCount,
     trades: account.trades.slice(-10),
   };
@@ -119,15 +120,22 @@ do {
       const fast = simpleMovingAverage(closes, strategyChoice.fastPeriod);
       const slow = simpleMovingAverage(closes, strategyChoice.slowPeriod);
       if (fast === null || slow === null) throw new Error("Not enough closed candles for the selected SMA profile.");
-      const signal = crossoverSignal(candles, strategyChoice.fastPeriod, strategyChoice.slowPeriod, index);
-      const action = account.process(candles, index, signal, averageTrueRange(candles, 14, index));
-      lastSignal = signal;
+      const profiles = [strategyChoice, ...STRATEGY_PROFILES.filter((profile) =>
+        profile.fastPeriod !== strategyChoice.fastPeriod || profile.slowPeriod !== strategyChoice.slowPeriod)];
+      const signals = profiles.map((profile) => ({
+        fastPeriod: profile.fastPeriod,
+        slowPeriod: profile.slowPeriod,
+        signal: crossoverSignal(candles, profile.fastPeriod, profile.slowPeriod, index),
+      }));
+      const action = account.process(candles, index, signals, averageTrueRange(candles, 14, index));
+      lastSignal = signals.some((item) => item.signal === "BUY") ? "BUY"
+        : signals.some((item) => item.signal === "SELL") ? "SELL" : "HOLD";
       lastAction = `${strategyChoice.status === "adaptive" ? "Adaptief" : "Leren"} SMA ${strategyChoice.fastPeriod}/${strategyChoice.slowPeriod} · ${action ?? signal}`;
       lastCloseTime = candle.closeTime;
       stateDirty = true;
       await savePaperState(persistentStatePath, snapshotState());
       stateDirty = false;
-      console.log(`${formatTime(candle.closeTime)} | close ${money(candle.close)} | SMA${strategyChoice.fastPeriod} ${money(fast)} / SMA${strategyChoice.slowPeriod} ${money(slow)} | ${strategyChoice.status} (${strategyChoice.validationTrades} validatietrades) | ${signal}${action ? ` — ${action}` : ""} | equity ${money(account.equity(candle.close))}`);
+      console.log(`${formatTime(candle.closeTime)} | close ${money(candle.close)} | SMA${strategyChoice.fastPeriod} ${money(fast)} / SMA${strategyChoice.slowPeriod} ${money(slow)} | ${strategyChoice.status} (${strategyChoice.validationTrades} validatietrades) | ${lastSignal}${action ? ` — ${action}` : ""} | positions ${account.positions.length}/3 | equity ${money(account.equity(candle.close))}`);
     }
     if (once) break;
   } catch (error) {
