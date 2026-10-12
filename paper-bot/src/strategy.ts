@@ -20,6 +20,19 @@ export function crossoverSignal(candles: Candle[], fastPeriod: number, slowPerio
   return "HOLD";
 }
 
+/**
+ * Paper experiment filter: permit new longs only when price is above the
+ * medium trend and the medium trend is above the slower trend.
+ */
+export function bullishTrendFilter(candles: Candle[], endIndex = candles.length - 1): boolean {
+  if (endIndex < 99) return false;
+  const closes = candles.slice(0, endIndex + 1).map((candle) => candle.close);
+  const price = closes[endIndex]!;
+  const medium = simpleMovingAverage(closes, 50, endIndex);
+  const slow = simpleMovingAverage(closes, 100, endIndex);
+  return medium !== null && slow !== null && price > medium && medium > slow;
+}
+
 export function averageTrueRange(candles: Candle[], period = 14, endIndex = candles.length - 1): number | null {
   if (endIndex < period) return null;
   let sum = 0;
