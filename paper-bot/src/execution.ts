@@ -1,4 +1,5 @@
 import { sizePosition } from "./risk.ts";
+import { bullishTrendFilter } from "./strategy.ts";
 import type { BotConfig, Candle, CompletedTrade, ExitReason, Position, Signal } from "./types.ts";
 
 export class PaperAccount {
@@ -47,12 +48,21 @@ export class PaperAccount {
 
     if (atr === null || this.positions.length >= MAX_OPEN_POSITIONS) return actions.length ? actions.join("; ") : null;
 
-    // Divide the existing portfolio risk and exposure limits over three slots.
-    // This allows concurrent positions without tripling the account's risk budget.
+    // Research guard: keep a single directional exposure at a time. The public
+    // portfolio limit remains three, but correlated SMA profiles cannot stack
+    // more long positions while an earlier long is open.
+    if (this.positions.length > 0) return actions.length ? actions.join("; ") : null;
+
     const perSlotRisk = this.config.riskFraction / MAX_OPEN_POSITIONS;
     const perSlotExposure = this.config.maxExposureFraction / MAX_OPEN_POSITIONS;
+    const trendAllowsLong = bullishTrendFilter(candles, index);
     for (const setup of signals) {
-      if (setup.signal !== "BUY" || this.positions.length >= MAX_OPEN_POSITIONS) continue;
+      if (setup.signal !== "BUY") continue;
+      if (!trendAllowsLong) {
+        actions.push(`FILTERED_TREND SMA${setup.fastPeriod}/${setup.slowPeriod}`);
+        continue;
+      }
+      if (this.positions.length >= MAX_OPEN_POSITIONS) break;
       if (this.positions.some((position) => position.fastPeriod === setup.fastPeriod && position.slowPeriod === setup.slowPeriod)) continue;
       const sized = sizePosition({
         equity: this.equity(candle.close), cash: this.cash, entryPrice: candle.close, atr,
@@ -75,6 +85,8 @@ export class PaperAccount {
       };
       this.positions.push(position);
       actions.push(`BUY SMA${setup.fastPeriod}/${setup.slowPeriod} ${sized.quantity.toFixed(6)} @ ${money(candle.close)} (SL ${money(sized.stopPrice)}; TP ${money(takeProfitPrice)}; risk ${money(sized.expectedStopLoss)})`);
+      // Only one new position can be opened per candle.
+      break;
     }
     return actions.length ? actions.join("; ") : null;
   }
